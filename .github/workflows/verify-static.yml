@@ -1,0 +1,38 @@
+name: Verify CloudSave static authentication pages
+
+on:
+  push:
+    branches:
+      - restart/cloudsave-static-google-direct-20261113
+    paths:
+      - 'site/**'
+      - 'verification/**'
+      - '.github/workflows/verify-static.yml'
+  pull_request:
+    paths:
+      - 'site/**'
+      - 'verification/**'
+      - '.github/workflows/verify-static.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Syntax checks
+        run: |
+          node --check site/auth.js
+          node --check site/config.js
+      - name: Static OAuth handoff tests
+        run: node --test verification/static-auth.test.cjs
+      - name: Reject custom service dependencies and secrets
+        run: |
+          ! grep -RniE 'vercel\.app|workers\.dev|cloudflare|render\.com|client_secret|refresh_token|token_endpoint' site
+          ! grep -RniE 'fetch\([^\n]*(vercel|workers|cloudflare|render)' site
