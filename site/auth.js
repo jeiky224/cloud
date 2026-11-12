@@ -121,6 +121,10 @@
 
     if (event.data.type === 'wayward-cloud-auth-hello') {
       openerVerified = true;
+      if (!fileMode) {
+        originConfirmed = true;
+        confirmWrap.hidden = true;
+      }
       if (mode === 'revoke') {
         postToGame({ type: 'wayward-cloud-revoke-ready', nonce });
       } else {
@@ -277,20 +281,29 @@
     confirmCopy.textContent = '이 인증 요청을 Wayward 게임에서 직접 시작했습니다: ' + gameOrigin;
   }
 
-  const mustConfirm = fileMode || !hasOpener();
-  confirmWrap.hidden = !mustConfirm;
-  originConfirmed = !mustConfirm;
-  if (mustConfirm) {
-    confirmBox.addEventListener('change', () => {
-      originConfirmed = confirmBox.checked;
-      updateControls();
-      status(originConfirmed
-        ? '실행 환경 확인을 완료했습니다. Google 인증을 진행할 수 있습니다.'
-        : 'Google 인증을 시작하려면 확인란을 선택하세요.');
-    });
+  // A nonce-bound hello from the actual opener is required for automatic
+  // delivery. A user confirmation enables the copy/paste path when the opener
+  // is absent or has been severed by an external browser.
+  confirmWrap.hidden = false;
+  originConfirmed = false;
+  confirmCopy.textContent = fileMode
+    ? 'opaque origin인 file:// 게임에서 제가 직접 Google 연결을 시작했습니다.'
+    : '이 주소의 Wayward 게임에서 제가 직접 시작한 인증 요청입니다: ' + gameOrigin;
+  confirmBox.addEventListener('change', () => {
+    originConfirmed = confirmBox.checked;
+    updateControls();
+    status(originConfirmed
+      ? '실행 환경 확인을 완료했습니다. 자동 전달 또는 수동 복구를 사용할 수 있습니다.'
+      : 'Google 인증을 시작하려면 확인란을 선택하세요.');
+  });
+  if (hasOpener()) {
+    originTitle.textContent = 'Wayward 게임 연결 요청 확인 중';
+    originDetail.textContent = fileMode
+      ? 'file://의 opaque origin은 사용자가 확인해야 합니다. 게임과 nonce 연결도 함께 확인합니다.'
+      : '게임의 실제 origin과 nonce 연결을 확인하고 있습니다.';
   } else {
-    originTitle.textContent = 'Wayward 게임의 팝업 요청';
-    originDetail.textContent = '팝업 source가 유지되면 nonce로 인증 응답을 원래 창에 전달합니다.';
+    originTitle.textContent = '외부 브라우저 수동 복구 모드';
+    originDetail.textContent = '게임 창으로 자동 전달할 수 없으면 인증 결과를 복사해 CloudSave에 붙여 넣습니다.';
   }
 
   if (!/^[^@\s]+\.apps\.googleusercontent\.com$/.test(clientId)) {
