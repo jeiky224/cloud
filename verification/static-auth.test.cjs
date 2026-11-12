@@ -185,6 +185,6 @@ test('the static site contains only a public client ID and explicit recovery gui
   assert.doesNotMatch(authSource, /localStorage|sessionStorage|console\.log/);
   assert.match(authSource, /event\.source !== window\.opener/);
   assert.match(authSource, /event\.data\.nonce/);
-  assert.match(authSource, /fileMode \? '\\*' : gameOrigin/);
+  assert.match(authSource, /fileMode \? '\*' : gameOrigin/);
   assert.doesNotMatch(index, /location\.replace/);
 });
