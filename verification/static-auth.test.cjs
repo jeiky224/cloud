@@ -98,13 +98,15 @@ test('file:// opaque-origin handoff uses wildcard only on the auth sender and a 
   assert.equal(page.elements['confirm-wrap'].hidden, false);
   assert.equal(page.elements.connect.disabled, true);
 
+  assert.equal(page.messages[0].data.type, 'wayward-cloud-auth-page-ready');
+  assert.equal(page.messages[0].targetOrigin, '*');
   page.listeners.message({
     source: page.parent,
     origin: 'null',
     data: { type: 'wayward-cloud-auth-hello', nonce }
   });
-  assert.equal(page.messages[0].data.type, 'wayward-cloud-auth-ready');
-  assert.equal(page.messages[0].targetOrigin, '*');
+  assert.equal(page.messages[1].data.type, 'wayward-cloud-auth-ready');
+  assert.equal(page.messages[1].targetOrigin, '*');
   assert.equal(page.elements.connect.disabled, true, 'file mode still requires explicit user confirmation');
 
   page.elements.confirm.checked = true;
@@ -125,6 +127,8 @@ test('0.0.0.0 is treated as a concrete HTTP origin, not as opaque file origin', 
   const nonce = 'abcdef0123456789abcdef0123456789abcdef0123456789';
   const origin = 'http://0.0.0.0:8090';
   const page = runPage({ gameOrigin: origin, nonce });
+  assert.equal(page.messages[0].data.type, 'wayward-cloud-auth-page-ready');
+  assert.equal(page.messages[0].targetOrigin, origin);
   page.listeners.message({
     source: page.parent,
     origin,
@@ -162,7 +166,8 @@ test('revoke mode waits for the opener handshake and sends the revoke result bac
     origin: 'null',
     data: { type: 'wayward-cloud-auth-hello', nonce }
   });
-  assert.equal(page.messages[0].data.type, 'wayward-cloud-revoke-ready');
+  assert.equal(page.messages[0].data.type, 'wayward-cloud-auth-page-ready');
+  assert.equal(page.messages[1].data.type, 'wayward-cloud-revoke-ready');
   page.listeners.message({
     source: page.parent,
     origin: 'null',
