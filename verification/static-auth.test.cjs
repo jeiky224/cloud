@@ -27,7 +27,7 @@ function makeElement(id) {
   };
 }
 
-function runPage({ gameOrigin, nonce, opener = true, mode = 'login' }) {
+function runPage({ gameOrigin, nonce, opener = true, mode = 'login', stateOverride }) {
   const ids = [
     'connect','status','origin-title','origin-detail','confirm-wrap','confirm',
     'confirm-copy','manual','manual-title','manual-detail','payload','copy',
@@ -54,7 +54,8 @@ function runPage({ gameOrigin, nonce, opener = true, mode = 'login' }) {
               options.callback({
                 access_token: 'test-access-token-only',
                 expires_in: 3600,
-                scope: options.scope
+                scope: options.scope,
+                state: stateOverride === undefined ? request.state : stateOverride
               });
             }
           };
@@ -177,6 +178,22 @@ test('revoke mode waits for the opener handshake and sends the revoke result bac
   assert.equal(page.messages.at(-1).data.type, 'wayward-cloud-revoke-result');
   assert.equal(page.messages.at(-1).data.revoked, true);
   assert.equal(page.messages.at(-1).targetOrigin, '*');
+});
+
+test('OAuth state mismatch is rejected before any token handoff', () => {
+  const nonce = '00112233445566778899aabbccddeeff0011223344556677';
+  const page = runPage({ gameOrigin: 'http://127.0.0.1:8080', nonce, stateOverride: 'wrong-state' });
+  page.listeners.message({
+    source: page.parent,
+    origin: 'http://127.0.0.1:8080',
+    data: { type: 'wayward-cloud-auth-hello', nonce }
+  });
+  page.elements.connect.listeners.click();
+  const result = page.messages.at(-1);
+  assert.equal(result.data.type, 'wayward-cloud-auth-error');
+  assert.equal(result.data.code, 'state_mismatch');
+  assert.equal(result.data.nonce, nonce);
+  assert.ok(!page.messages.some(x => x.data.type === 'wayward-cloud-auth-success'));
 });
 
 test('the static site contains only a public client ID and explicit recovery guidance', () => {
