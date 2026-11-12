@@ -155,9 +155,23 @@ test('external-browser/no-opener mode exposes a manual response instead of faili
 
 test('revoke mode waits for the opener handshake and sends the revoke result back directly', () => {
   const nonce = '1234567890abcdef1234567890abcdef1234567890abcdef';
-  const page = runPage({ gameOrigin: 'file-origin-placeholder', nonce, opener: true, mode: 'revoke' });
-  // This fake origin is invalid, so the page remains safely disabled.
+  const page = runPage({ gameOrigin: 'null', nonce, opener: true, mode: 'revoke' });
   assert.equal(page.elements.connect.hidden, true);
+  page.listeners.message({
+    source: page.parent,
+    origin: 'null',
+    data: { type: 'wayward-cloud-auth-hello', nonce }
+  });
+  assert.equal(page.messages[0].data.type, 'wayward-cloud-revoke-ready');
+  page.listeners.message({
+    source: page.parent,
+    origin: 'null',
+    data: { type: 'wayward-cloud-revoke', nonce, accessToken: 'test-token-to-revoke' }
+  });
+  assert.equal(page.gisCalls[0].revokeToken, 'test-token-to-revoke');
+  assert.equal(page.messages.at(-1).data.type, 'wayward-cloud-revoke-result');
+  assert.equal(page.messages.at(-1).data.revoked, true);
+  assert.equal(page.messages.at(-1).targetOrigin, '*');
 });
 
 test('the static site contains only a public client ID and explicit recovery guidance', () => {
@@ -170,7 +184,7 @@ test('the static site contains only a public client ID and explicit recovery gui
   assert.doesNotMatch(authSource, /vercel\.app|workers\.dev|cloudflare|render\.com|wss?:\/\//i);
   assert.doesNotMatch(authSource, /localStorage|sessionStorage|console\.log/);
   assert.match(authSource, /event\.source !== window\.opener/);
-  assert.match(authSource, /event\.nonce/);
+  assert.match(authSource, /event\.data\.nonce/);
   assert.match(authSource, /fileMode \? '\\*' : gameOrigin/);
   assert.doesNotMatch(index, /location\.replace/);
 });
