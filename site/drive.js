@@ -272,7 +272,9 @@
   }
 
   async function revokeAccess(revokeFn) {
-    requireToken();
+    try { requireToken(); } catch (_) {
+      return { successful: false, error: 'reauth-required' };
+    }
     if (typeof revokeFn !== 'function') {
       clearAccessToken();
       return { successful: false, error: 'gis-unavailable' };
