@@ -28,8 +28,10 @@ jobs:
       - name: Checkout static page source
         uses: actions/checkout@v4
 
-      - name: Configure GitHub Pages
+      - name: Configure or enable GitHub Pages
         uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - name: Upload static page artifact
         uses: actions/upload-pages-artifact@v3
