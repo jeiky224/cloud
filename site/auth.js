@@ -312,9 +312,11 @@
       } else if (code === 'scope-missing') {
         clearPageToken();
         sendStatus('scope-missing', error.message);
-      } else if (code === 'permission-revoked' || code === 'permission-denied') {
+      } else if (code === 'permission-revoked') {
         clearPageToken();
         sendStatus('permission-revoked', error.message);
+      } else if (code === 'permission-denied') {
+        sendStatus('permission-denied', error.message);
       } else {
         sendStatus(code, error && error.message || 'Google Drive 요청에 실패했습니다.');
       }
