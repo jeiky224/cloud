@@ -271,6 +271,29 @@
     return { deleted: true, slot, name: file.name };
   }
 
+  async function revokeAccess(revokeFn) {
+    requireToken();
+    if (typeof revokeFn !== 'function') {
+      clearAccessToken();
+      return { successful: false, error: 'gis-unavailable' };
+    }
+    const token = accessToken;
+    return new Promise(resolve => {
+      let settled = false;
+      const finish = successful => {
+        if (settled) return;
+        settled = true;
+        clearAccessToken();
+        resolve({ successful: successful === true });
+      };
+      try {
+        revokeFn(token, response => finish(!!(response && response.successful === true)));
+      } catch (_) {
+        finish(false);
+      }
+    });
+  }
+
   async function perform(action, payload) {
     const data = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
     if (action === 'list') return list();
@@ -284,6 +307,7 @@
     setAccessToken,
     clearAccessToken,
     hasAccessToken: () => !!accessToken && Date.now() < expiresAt - 15000,
+    revokeAccess,
     perform
   });
 })();
