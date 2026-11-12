@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="referrer" content="no-referrer">
+  <meta name="color-scheme" content="dark light">
+  <title>Wayward CloudSave 인증</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color-scheme:dark light}
+    body{margin:0;min-height:100svh;display:grid;place-items:center;padding:24px;background:#111827;color:#f3f4f6}
+    main{width:min(100%,480px);padding:24px;border:1px solid #374151;border-radius:16px;background:#1f2937}
+    h1{font-size:1.35rem}p{line-height:1.55;color:#d1d5db}
+    a{display:inline-block;padding:12px 16px;border-radius:9px;background:#4285f4;color:white;text-decoration:none;font-weight:650}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Wayward CloudSave</h1>
+    <p>정적 Google 인증 페이지입니다. 로그인과 Google Drive 요청은 Google에 직접 전송됩니다. 별도 인증 서버, Worker, 프록시 또는 데이터베이스를 사용하지 않습니다.</p>
+    <p>게임에서 연 인증 창이 이 안내 페이지라면 아래 링크를 눌러 Google 인증을 계속하세요. 외부 브라우저에서 연 경우 인증 완료 후 응답 JSON을 게임으로 복사해야 합니다.</p>
+    <a id="open" href="./auth.html">Google 인증 화면 열기</a>
+  </main>
+  <script>
+    (() => {
+      const params = new URLSearchParams(location.search);
+      const next = new URL('./auth.html', location.href);
+      next.search = params.toString();
+      document.getElementById('open').href = next.toString();
+    })();
+  </script>
+</body>
+</html>
