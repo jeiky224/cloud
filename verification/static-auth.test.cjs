@@ -361,15 +361,21 @@ test('expired or revoked Drive tokens map to a re-authentication error without s
 });
 
 test('static page uses the exact existing public Web Client ID and has no refresh-token storage or relay', () => {
-  assert.match(config, /35944231952-p82giir62o28bo001j9uvmqo3kgp9c99\\.apps\\.googleusercontent\\.com/);
-  assert.match(authHtml, /accounts\\.google\\.com\\/gsi\\/client/);
-  assert.match(authHtml, /drive\\.js/);
-  assert.match(authHtml, /https:\\/\\/www\\.googleapis\\.com/);
-  assert.doesNotMatch(authSource, /localStorage|sessionStorage|indexedDB|refresh_token|refreshToken|client_secret|console\\.log/i);
-  assert.doesNotMatch(driveSource, /localStorage|sessionStorage|indexedDB|refresh_token|refreshToken|client_secret|console\\.log/i);
-  assert.doesNotMatch(authSource, /postMessage[\\s\\S]{0,500}(accessToken|access_token)/i);
-  assert.doesNotMatch(authSource + driveSource, /vercel\\.app|workers\\.dev|cloudflare|render\\.com|wss?:\\/\\//i);
-  assert.match(authSource, /event\\.source === window\\.opener/);
-  assert.match(authSource, /event\\.origin === expectedEventOrigin/);
-  assert.match(authSource, /seenRequestIds\\.has\\(data\\.requestId\\)/);
+  assert.ok(config.includes(CLIENT_ID));
+  assert.ok(authHtml.includes('https://accounts.google.com/gsi/client'));
+  assert.ok(authHtml.includes('./drive.js'));
+  assert.ok(authHtml.includes('https://www.googleapis.com'));
+  assert.doesNotMatch(authSource, /localStorage|sessionStorage|indexedDB|refresh_token|refreshToken|client_secret|console\.log/i);
+  assert.doesNotMatch(driveSource, /localStorage|sessionStorage|indexedDB|refresh_token|refreshToken|client_secret|console\.log/i);
+  const sendFn = authSource.slice(
+    authSource.indexOf('function sendToGame('),
+    authSource.indexOf('function sendStatus(', authSource.indexOf('function sendToGame('))
+  );
+  assert.doesNotMatch(sendFn, /accessToken|access_token/);
+  for (const banned of ['vercel.app', 'workers.dev', 'cloudflare', 'render.com', 'wss://', 'ws://']) {
+    assert.ok(!authSource.includes(banned) && !driveSource.includes(banned), 'forbidden service: ' + banned);
+  }
+  assert.ok(authSource.includes('event.source === window.opener'));
+  assert.ok(authSource.includes('event.origin === expectedEventOrigin'));
+  assert.ok(authSource.includes('seenRequestIds.has(data.requestId)'));
 });
