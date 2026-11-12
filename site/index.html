@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="referrer" content="no-referrer">
+  <meta name="color-scheme" content="dark light">
+  <title>Wayward CloudSave 인증</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color-scheme:dark light}
+    body{margin:0;min-height:100svh;display:grid;place-items:center;padding:24px;background:#111827;color:#f3f4f6}
+    main{width:min(100%,480px);padding:24px;border:1px solid #374151;border-radius:16px;background:#1f2937}
+    h1{font-size:1.35rem}p{line-height:1.55;color:#d1d5db}
+    a{display:inline-block;padding:12px 16px;border-radius:9px;background:#4285f4;color:white;text-decoration:none;font-weight:650}
+    code{overflow-wrap:anywhere}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Wayward CloudSave</h1>
+    <p>이 사이트는 정적 Google 인증 화면입니다. 로그인과 Google Drive 요청은 Google에 직접 전송됩니다. 별도 인증 서버, Worker, 프록시 또는 데이터베이스를 사용하지 않습니다.</p>
+    <p id="status">게임에서 전달된 인증 요청을 확인하고 있습니다.</p>
+    <a id="open" href="./auth.html">인증 화면 열기</a>
+  </main>
+  <script>
+    (() => {
+      const params = new URLSearchParams(location.search);
+      const nonce = params.get('nonce') || '';
+      const origin = params.get('origin') || '';
+      const validNonce = /^[a-f0-9]{48}$/.test(nonce);
+      if (validNonce && (origin === 'null' || /^(https?):\/\//.test(origin))) {
+        const next = new URL('./auth.html', location.href);
+        next.search = location.search;
+        location.replace(next.toString());
+        return;
+      }
+      document.getElementById('status').textContent =
+        '게임의 CloudSave 화면에서 Google 연결을 시작하면 이 정적 인증 페이지가 열립니다.';
+    })();
+  </script>
+</body>
+</html>
