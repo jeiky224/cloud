@@ -250,9 +250,14 @@
         return;
       }
       setDriveStatus('Google에 앱 권한 철회를 요청하는 중…');
-      const result = await window.WaywardCloudSaveDrive.revokeAccess(
-        (token, callback) => google.accounts.oauth2.revoke(token, callback)
-      );
+      let result = null;
+      try {
+        result = await window.WaywardCloudSaveDrive.revokeAccess(
+          (token, callback) => google.accounts.oauth2.revoke(token, callback)
+        );
+      } catch (error) {
+        result = { successful: false, error: String(error && error.message || error) };
+      }
       connected = false;
       updateButtons();
       if (result && result.successful === true) {
@@ -305,8 +310,10 @@
         clearPageToken();
         sendStatus('reauth-required', error.message);
       } else if (code === 'scope-missing') {
+        clearPageToken();
         sendStatus('scope-missing', error.message);
       } else if (code === 'permission-revoked' || code === 'permission-denied') {
+        clearPageToken();
         sendStatus('permission-revoked', error.message);
       } else {
         sendStatus(code, error && error.message || 'Google Drive 요청에 실패했습니다.');
@@ -336,6 +343,17 @@
 
     if (data.type === 'wayward-cloudsave-request') {
       if (!ready || !userConfirmed || !sessionId || data.sessionId !== sessionId) return;
+      if (requestCount >= MAX_REQUESTS &&
+          typeof data.requestId === 'string' &&
+          /^[a-f0-9]{48}$/.test(data.requestId) &&
+          !seenRequestIds.has(data.requestId)) {
+        sendStatus('session-request-limit', '이 인증 세션의 Drive 요청 한도에 도달했습니다. 새 연결을 시작하세요.');
+        sendResponse(data.requestId, false, null, {
+          code: 'session-request-limit',
+          message: '인증 세션 요청 한도를 초과했습니다.'
+        });
+        return;
+      }
       if (!validateRequest(data)) return;
       processRequest(data).catch(error => {
         sendResponse(data.requestId, false, null, error);
@@ -493,9 +511,14 @@
     if (!connected || !window.WaywardCloudSaveDrive) return;
     revokeButton.disabled = true;
     setDriveStatus('Google에 권한 철회를 요청하는 중…');
-    const result = await window.WaywardCloudSaveDrive.revokeAccess(
-      (token, callback) => google.accounts.oauth2.revoke(token, callback)
-    );
+    let result = null;
+    try {
+      result = await window.WaywardCloudSaveDrive.revokeAccess(
+        (token, callback) => google.accounts.oauth2.revoke(token, callback)
+      );
+    } catch (_) {
+      result = { successful: false };
+    }
     connected = false;
     updateButtons();
     if (result && result.successful === true) {
