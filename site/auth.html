@@ -16,39 +16,39 @@
 <body>
   <main>
     <h1>Wayward CloudSave</h1>
-    <p class="intro">이 HTTPS 정적 페이지가 Google 계정 인증과 Google Drive 통신을 전담합니다. 액세스 토큰은 이 페이지의 메모리에만 보관하며 Wayward 게임 창으로 전달하지 않습니다.</p>
+    <p class="intro">Google 계정 인증 인증과 Drive 연동은 본 페이지에서 처리됩니다. 액세스 토큰은 페이지 메모리에만 보관되며 게임으로 전달되지 않습니다.</p>
 
     <section id="connection" class="panel" aria-live="polite">
-      <strong id="origin-title">Wayward 게임 연결 확인 중…</strong>
-      <p id="origin-detail">일회성 nonce와 팝업 창을 확인하고 있습니다.</p>
+      <strong id="origin-title">게임 연결 확인 중…</strong>
+      <p id="origin-detail">보안 연결을 확인하고 있습니다.</p>
       <p id="origin-value" class="small"></p>
     </section>
 
     <label id="confirm-wrap" class="confirm" hidden>
       <input id="confirm" type="checkbox">
-      <span id="confirm-copy">이 페이지를 Wayward 게임에서 직접 열었습니다.</span>
+      <span id="confirm-copy">Wayward 게임에서 직접 시작한 인증 요청입니다.</span>
     </label>
 
     <section class="panel">
       <strong>Google 계정</strong>
-      <p id="account-status" role="status" aria-live="polite">게임 연결과 사용자 확인을 기다리고 있습니다.</p>
+      <p id="account-status" role="status" aria-live="polite">게임 연결 확인을 기다리고 있습니다.</p>
       <div class="actions">
-        <button id="connect" type="button" disabled>기존 Google 계정으로 연결</button>
-        <button id="select-account" type="button" class="secondary" disabled>Google 계정 선택</button>
+        <button id="connect" type="button" disabled>계정 연결</button>
+        <button id="select-account" type="button" class="secondary" disabled>계정 변경</button>
       </div>
       <div class="actions">
-        <button id="logout" type="button" class="secondary" disabled>명시적 로그아웃</button>
-        <button id="revoke" type="button" class="danger" disabled>Google 앱 권한 철회</button>
+        <button id="logout" type="button" class="secondary" disabled>로그아웃</button>
+        <button id="revoke" type="button" class="danger" disabled>앱 권한 해제</button>
       </div>
     </section>
 
     <section class="panel">
-      <strong>Google Drive 연결 상태</strong>
-      <p id="drive-status" role="status" aria-live="polite">아직 Drive에 연결되지 않았습니다.</p>
+      <strong>Google Drive</strong>
+      <p id="drive-status" role="status" aria-live="polite">연결되지 않음</p>
     </section>
 
-    <p id="status" role="status" aria-live="polite">초기화 중…</p>
-    <p class="footnote">토큰 만료 시 사용자가 이 페이지의 연결 버튼을 눌러 재인증해야 합니다. 서버 없는 장기 무인 Refresh Token 갱신은 제공하지 않습니다.</p>
+    <p id="status" role="status" aria-live="polite">인증 환경 확인 중…</p>
+    <p class="footnote">액세스 토큰 만료 시 재인증이 필요합니다. 장기 자동 갱신은 지원하지 않습니다.</p>
     <p class="footnote"><a href="./recovery.html">팝업 연결 및 오류 복구 안내</a></p>
   </main>
 </body>
