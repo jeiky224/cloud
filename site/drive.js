@@ -99,7 +99,7 @@
         throw makeError('scope-missing', details.message || 'Google Drive appData 권한이 승인되지 않았습니다.', 403);
       }
       if (details.status === 'PERMISSION_DENIED') {
-        throw makeError('permission-revoked', details.message || 'Google Drive 접근 권한이 거부되었습니다.', 403);
+        throw makeError('permission-denied', details.message || 'Google Drive API가 요청을 거부했습니다. 계정 권한과 앱 설정을 확인하세요.', 403);
       }
       if (details.status === 'RESOURCE_EXHAUSTED') {
         throw makeError('quota-exceeded', details.message || 'Google Drive API 사용량 제한에 도달했습니다.', 403);
