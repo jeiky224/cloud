@@ -5,365 +5,531 @@
   const params = new URLSearchParams(location.search);
   const gameOrigin = params.get('origin') || '';
   const nonce = params.get('nonce') || '';
-  const mode = params.get('mode') === 'revoke' ? 'revoke' : 'login';
   const loginPolicy = params.get('login') === 'select_account' ? 'select_account' : 'remember';
   const clientId = String(window.WAYWARD_GOOGLE_CLIENT_ID || '').trim();
   const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
-  const AUTH_ORIGIN = location.origin;
+  const PAGES_ORIGIN = 'https://jeiky224.github.io';
+  const PROTOCOL_VERSION = 1;
+  const MAX_REQUESTS = 2048;
+  const MAX_PAYLOAD_CHARS = 12 * 1024 * 1024;
 
-  const button = $('connect');
+  const connectButton = $('connect');
+  const selectButton = $('select-account');
+  const logoutButton = $('logout');
+  const revokeButton = $('revoke');
   const statusNode = $('status');
+  const accountStatus = $('account-status');
+  const driveStatus = $('drive-status');
   const originTitle = $('origin-title');
   const originDetail = $('origin-detail');
+  const originValue = $('origin-value');
   const confirmWrap = $('confirm-wrap');
   const confirmBox = $('confirm');
   const confirmCopy = $('confirm-copy');
-  const manual = $('manual');
-  const manualTitle = $('manual-title');
-  const manualDetail = $('manual-detail');
-  const payloadBox = $('payload');
 
   let ready = false;
-  let finished = false;
-  let openerVerified = false;
-  let originConfirmed = false;
-  let googleTokenClient = null;
+  let openerSeen = false;
+  let userConfirmed = false;
+  let sessionId = '';
+  let tokenTimer = null;
+  let popupWatchTimer = null;
+  let connected = false;
+  let requestCount = 0;
+  const seenRequestIds = new Set();
 
-  function status(message, error) {
+  function setStatus(message, error) {
     statusNode.textContent = String(message || '');
     statusNode.classList.toggle('error', error === true);
   }
 
-  function classifyGameOrigin(value) {
+  function setAccountStatus(message, error) {
+    accountStatus.textContent = String(message || '');
+    accountStatus.classList.toggle('error', error === true);
+  }
+
+  function setDriveStatus(message, error) {
+    driveStatus.textContent = String(message || '');
+    driveStatus.classList.toggle('error', error === true);
+  }
+
+  function makeNonce() {
+    const bytes = new Uint8Array(24);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('');
+  }
+
+  function classifyOrigin(value) {
     if (value === 'null') return 'file';
     let parsed;
-    try { parsed = new URL(value); } catch (_) { return 'invalid'; }
+    try { parsed = new URL(value); }
+    catch (_) { return 'invalid'; }
     if (!['http:', 'https:'].includes(parsed.protocol) ||
         parsed.origin !== value || parsed.username || parsed.password) return 'invalid';
     return parsed.protocol === 'https:' ? 'https' : 'http';
   }
 
-  const originKind = classifyGameOrigin(gameOrigin);
+  const originKind = classifyOrigin(gameOrigin);
   const fileMode = originKind === 'file';
+  const expectedEventOrigin = fileMode ? 'null' : gameOrigin;
   const nonceValid = /^[a-f0-9]{48}$/.test(nonce);
   const originValid = originKind !== 'invalid';
 
-  function hasOpener() {
+  function openerAlive() {
     try { return !!window.opener && !window.opener.closed; }
     catch (_) { return false; }
   }
 
-  function postToGame(payload) {
-    if (!openerVerified || !hasOpener()) return false;
-    const target = fileMode ? '*' : gameOrigin;
+  function targetGameOrigin() {
+    return fileMode ? '*' : gameOrigin;
+  }
+
+  function baseMessage(type, extra) {
+    return Object.assign({
+      type,
+      version: PROTOCOL_VERSION,
+      nonce
+    }, extra || {});
+  }
+
+  function sendToGame(type, extra) {
+    if (!openerSeen || !openerAlive() || !nonceValid || !originValid) return false;
+    const payload = baseMessage(type, extra);
+    if (sessionId) payload.sessionId = sessionId;
     try {
-      // file:// has an opaque origin, so '*' is unavoidable here. The game
-      // must independently validate this page's exact HTTPS origin, popup
-      // WindowProxy, nonce, type, token shape, and expiry before accepting.
-      window.opener.postMessage(payload, target);
+      window.opener.postMessage(payload, targetGameOrigin());
       return true;
     } catch (_) {
       return false;
     }
   }
 
-  function showManual(payload, detail) {
-    manual.hidden = false;
-    manualTitle.textContent = payload && payload.type === 'wayward-cloud-auth-success'
-      ? 'Google 인증 결과 수동 전달'
-      : '인증 응답 수동 전달';
-    manualDetail.textContent = detail ||
-      '자동 전달이 되지 않았습니다. 아래 일회성 JSON을 복사해 원래 Wayward CloudSave 화면에 붙여 넣으세요.';
-    payloadBox.value = JSON.stringify(payload);
-    $('copy').focus();
+  function sendStatus(status, message, extra) {
+    const payload = Object.assign({ status: String(status), message: String(message || '') }, extra || {});
+    sendToGame('wayward-cloudsave-status', payload);
+    setAccountStatus(message || status, status !== 'connected' && status !== 'logged-out');
   }
 
-  function deliver(payload) {
-    if (postToGame(payload)) {
-      status('인증 결과를 원래 Wayward 창에 전달했습니다. 게임으로 돌아가세요.');
-      button.disabled = true;
-      setTimeout(() => { try { window.close(); } catch (_) {} }, 900);
-      return true;
+  function clearTokenTimer() {
+    if (tokenTimer !== null) {
+      clearTimeout(tokenTimer);
+      tokenTimer = null;
     }
-    showManual(payload);
-    status('게임 창으로 자동 전달되지 않았습니다. 아래 응답을 복사해 게임에 붙여 넣으세요.');
-    return false;
   }
 
-  function sendError(message, code) {
-    if (finished) return;
-    finished = true;
-    const payload = {
-      type: 'wayward-cloud-auth-error',
-      nonce,
-      code: String(code || 'auth_error'),
-      message: String(message || 'Google 인증에 실패했습니다.')
+  function clearPageToken() {
+    clearTokenTimer();
+    try {
+      if (window.WaywardCloudSaveDrive) window.WaywardCloudSaveDrive.clearAccessToken();
+    } catch (_) {}
+    connected = false;
+    updateButtons();
+  }
+
+  function updateButtons() {
+    const canAuth = ready && openerSeen && userConfirmed && openerAlive();
+    connectButton.disabled = !canAuth;
+    selectButton.disabled = !canAuth;
+    logoutButton.disabled = !connected;
+    revokeButton.disabled = !connected;
+  }
+
+  function showConfirm() {
+    confirmWrap.hidden = false;
+    confirmBox.checked = false;
+    userConfirmed = false;
+    confirmCopy.textContent = fileMode
+      ? '제가 직접 file://로 실행한 Wayward 게임에서 연 인증 팝업입니다. 이 게임 창에 Google Drive 명령을 허용합니다.'
+      : '제가 직접 시작한 Wayward 게임의 인증 팝업입니다: ' + gameOrigin;
+    updateButtons();
+  }
+
+  function failClosed(message) {
+    clearPageToken();
+    userConfirmed = false;
+    ready = false;
+    connectButton.disabled = true;
+    selectButton.disabled = true;
+    logoutButton.disabled = true;
+    revokeButton.disabled = true;
+    setStatus(message, true);
+    setAccountStatus('게임 팝업과의 신뢰된 연결이 없습니다.', true);
+    setDriveStatus('Drive 요청은 허용되지 않았습니다.', true);
+  }
+
+  function validParentMessage(event, data) {
+    return openerAlive() &&
+      event.source === window.opener &&
+      event.origin === expectedEventOrigin &&
+      data && typeof data === 'object' &&
+      data.version === PROTOCOL_VERSION &&
+      data.nonce === nonce;
+  }
+
+  function exactKeys(value, allowed, required) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const keys = Object.keys(value);
+    if (keys.some(key => !allowed.includes(key))) return false;
+    return required.every(key => Object.prototype.hasOwnProperty.call(value, key));
+  }
+
+  function validSlot(value) {
+    return Number.isSafeInteger(value) && value >= 1 && value <= 1000000000;
+  }
+
+  function sendResponse(requestId, ok, data, error) {
+    const extra = { requestId, ok: ok === true };
+    if (ok) extra.data = data == null ? null : data;
+    else extra.error = {
+      code: String(error && error.code || 'request-failed'),
+      message: String(error && error.message || 'Google Drive 요청에 실패했습니다.'),
+      status: Number(error && error.status || 0)
     };
-    if (!deliver(payload)) status(payload.message, true);
-    button.disabled = true;
+    sendToGame('wayward-cloudsave-response', extra);
   }
 
-  function updateControls() {
-    const canUse = ready && nonceValid && originValid && originConfirmed && !finished;
-    button.disabled = !canUse;
-    if (mode === 'revoke') button.textContent = 'Google 권한 철회 대기';
-    else button.textContent = loginPolicy === 'select_account'
-      ? 'Google 계정 선택' : '기존 Google 계정으로 연결';
+  function validateRequest(data) {
+    if (!data || data.type !== 'wayward-cloudsave-request' ||
+        data.version !== PROTOCOL_VERSION ||
+        data.nonce !== nonce ||
+        data.sessionId !== sessionId ||
+        typeof data.requestId !== 'string' ||
+        !/^[a-f0-9]{48}$/.test(data.requestId) ||
+        typeof data.action !== 'string' ||
+        !data.payload || typeof data.payload !== 'object' || Array.isArray(data.payload)) {
+      return false;
+    }
+    if (seenRequestIds.has(data.requestId) || requestCount >= MAX_REQUESTS) return false;
+    const payload = data.payload;
+    switch (data.action) {
+      case 'list':
+      case 'logout':
+      case 'revoke':
+        return exactKeys(payload, [], []);
+      case 'read':
+      case 'delete':
+        return exactKeys(payload, ['slot'], ['slot']) && validSlot(payload.slot);
+      case 'save':
+        return exactKeys(payload, ['slot', 'envelope'], ['slot', 'envelope']) &&
+          validSlot(payload.slot) &&
+          payload.envelope && typeof payload.envelope === 'object' &&
+          !Array.isArray(payload.envelope);
+      default:
+        return false;
+    }
+  }
+
+  async function processRequest(data) {
+    const { requestId, action, payload } = data;
+    seenRequestIds.add(requestId);
+    requestCount += 1;
+    if (seenRequestIds.size > MAX_REQUESTS) {
+      clearPageToken();
+      sendResponse(requestId, false, null, {
+        code: 'session-request-limit',
+        message: '이 인증 세션에서 허용된 요청 수를 초과했습니다. 게임에서 새 연결을 시작하세요.'
+      });
+      return;
+    }
+
+    if (action === 'logout') {
+      clearPageToken();
+      sendStatus('logged-out', '이 페이지의 Google 액세스 토큰을 메모리에서 지웠습니다. Google 앱 권한 동의는 유지됩니다.');
+      setDriveStatus('로그아웃됨');
+      sendResponse(requestId, true, { loggedOut: true });
+      return;
+    }
+
+    if (action === 'revoke') {
+      if (!connected || !window.WaywardCloudSaveDrive ||
+          typeof window.google?.accounts?.oauth2?.revoke !== 'function') {
+        sendResponse(requestId, false, null, {
+          code: 'revoke-unavailable',
+          message: '철회할 Google 토큰이 없거나 Google 철회 API를 사용할 수 없습니다.'
+        });
+        sendStatus('revoke-failed', 'Google 앱 권한 철회를 확인하지 못했습니다.');
+        return;
+      }
+      setDriveStatus('Google에 앱 권한 철회를 요청하는 중…');
+      const result = await window.WaywardCloudSaveDrive.revokeAccess(
+        (token, callback) => google.accounts.oauth2.revoke(token, callback)
+      );
+      connected = false;
+      updateButtons();
+      if (result && result.successful === true) {
+        sendStatus('permission-revoked', 'Google에서 앱 권한 철회를 확인했습니다.');
+        setDriveStatus('Google 앱 권한이 철회되었습니다.');
+        sendResponse(requestId, true, { revoked: true });
+      } else {
+        sendStatus('revoke-failed', 'Google 권한 철회 성공 응답을 받지 못했습니다.');
+        setDriveStatus('권한 철회가 확인되지 않았습니다.', true);
+        sendResponse(requestId, false, null, {
+          code: 'revoke-failed',
+          message: 'Google이 권한 철회 성공을 확인하지 않았습니다.'
+        });
+      }
+      return;
+    }
+
+    if (!connected || !window.WaywardCloudSaveDrive ||
+        !window.WaywardCloudSaveDrive.hasAccessToken()) {
+      connected = false;
+      updateButtons();
+      sendStatus('reauth-required', '액세스 토큰이 만료되었습니다. 이 인증 페이지의 Google 연결 버튼을 눌러 다시 인증하세요.');
+      sendResponse(requestId, false, null, {
+        code: 'reauth-required',
+        message: 'Google 액세스 토큰이 만료되었거나 아직 연결되지 않았습니다.'
+      });
+      return;
+    }
+
+    try {
+      const jsonLength = JSON.stringify(payload).length;
+      if (jsonLength > MAX_PAYLOAD_CHARS) {
+        throw { code: 'request-too-large', message: 'Google Drive 요청 데이터가 허용된 크기를 초과했습니다.' };
+      }
+      const result = await window.WaywardCloudSaveDrive.perform(action, payload);
+      sendResponse(requestId, true, result);
+      if (action === 'list') {
+        const count = Array.isArray(result && result.files) ? result.files.length : 0;
+        setDriveStatus('Google Drive 저장 슬롯 목록을 확인했습니다. (' + count + '개)');
+      } else if (action === 'save') {
+        setDriveStatus('저장 슬롯 ' + payload.slot + ' 저장을 완료했습니다.');
+      } else if (action === 'delete') {
+        setDriveStatus('저장 슬롯 ' + payload.slot + ' 삭제를 완료했습니다.');
+      } else if (action === 'read') {
+        setDriveStatus('저장 슬롯 ' + payload.slot + ' 데이터를 전달했습니다.');
+      }
+    } catch (error) {
+      const code = String(error && error.code || 'drive-error');
+      if (code === 'reauth-required') {
+        clearPageToken();
+        sendStatus('reauth-required', error.message);
+      } else if (code === 'scope-missing') {
+        sendStatus('scope-missing', error.message);
+      } else if (code === 'permission-revoked' || code === 'permission-denied') {
+        sendStatus('permission-revoked', error.message);
+      } else {
+        sendStatus(code, error && error.message || 'Google Drive 요청에 실패했습니다.');
+      }
+      setDriveStatus(error && error.message || 'Google Drive 요청 실패', true);
+      sendResponse(requestId, false, null, error);
+    }
   }
 
   function onParentMessage(event) {
-    if (!hasOpener() || event.source !== window.opener || !event.data ||
-        event.data.nonce !== nonce) return;
+    const data = event.data;
+    if (!validParentMessage(event, data)) return;
 
-    // For file://, the sender's serialized origin is the opaque string "null".
-    // For HTTP(S), require an exact match to the origin bound into this request.
-    if (fileMode ? event.origin !== 'null' : event.origin !== gameOrigin) return;
-
-    if (event.data.type === 'wayward-cloud-auth-hello') {
-      openerVerified = true;
-      if (!fileMode) {
-        originConfirmed = true;
-        confirmWrap.hidden = true;
-      }
-      if (mode === 'revoke') {
-        postToGame({ type: 'wayward-cloud-revoke-ready', nonce });
-      } else {
-        postToGame({ type: 'wayward-cloud-auth-ready', nonce });
-      }
-      originTitle.textContent = 'Wayward 게임 연결 확인됨';
+    if (data.type === 'wayward-cloudsave-hello') {
+      if (openerSeen || !/^[a-f0-9]{48}$/.test(nonce)) return;
+      openerSeen = true;
+      try { sessionId = makeNonce(); }
+      catch (_) { failClosed('이 브라우저에서 암호학적 난수를 생성하지 못했습니다.'); return; }
+      originTitle.textContent = 'Wayward 게임 팝업의 핸드셰이크 확인됨';
       originDetail.textContent = fileMode
-        ? 'file:// 게임 창과 nonce 연결을 확인했습니다. 불투명 출처이므로 아래 본인 확인도 필요합니다.'
-        : '게임 창의 실제 origin과 일회성 nonce를 확인했습니다.';
-      updateControls();
+        ? '게임 Origin은 opaque origin(null)이며, 실제 opener 창과 일회성 nonce가 확인되었습니다.'
+        : '실제 opener 창, 지정된 게임 Origin, 일회성 nonce가 확인되었습니다.';
+      originValue.textContent = '게임 Origin: ' + gameOrigin;
+      showConfirm();
       return;
     }
 
-    if (mode === 'revoke' && event.data.type === 'wayward-cloud-revoke') {
-      revokeToken(event.data.accessToken);
+    if (data.type === 'wayward-cloudsave-request') {
+      if (!ready || !userConfirmed || !sessionId || data.sessionId !== sessionId) return;
+      if (!validateRequest(data)) return;
+      processRequest(data).catch(error => {
+        sendResponse(data.requestId, false, null, error);
+      });
     }
   }
 
-  function revokeToken(token) {
-    if (finished) return;
-    if (typeof token !== 'string' || !token || token.length > 4096) {
-      deliver({ type: 'wayward-cloud-revoke-result', nonce, revoked: false, error: 'invalid_token' });
-      finished = true;
+  function beginConnection(forceSelectAccount) {
+    if (!ready || !openerSeen || !userConfirmed || !openerAlive()) {
+      setStatus('Wayward 게임 팝업 연결을 먼저 확인해야 합니다.', true);
       return;
     }
     if (!window.google || !google.accounts || !google.accounts.oauth2 ||
-        typeof google.accounts.oauth2.revoke !== 'function') {
-      deliver({ type: 'wayward-cloud-revoke-result', nonce, revoked: false, error: 'gis_unavailable' });
-      finished = true;
+        typeof google.accounts.oauth2.initTokenClient !== 'function') {
+      setStatus('Google Identity 라이브러리를 아직 사용할 수 없습니다.', true);
       return;
     }
-    status('Google에 앱 권한 철회를 직접 요청하고 있습니다.');
-    try {
-      google.accounts.oauth2.revoke(token, response => {
-        if (finished) return;
-        finished = true;
-        const revoked = !!(response && response.successful === true);
-        deliver({
-          type: 'wayward-cloud-revoke-result',
-          nonce,
-          revoked,
-          error: response && response.error ? String(response.error) : ''
-        });
-      });
-    } catch (error) {
-      finished = true;
-      deliver({
-        type: 'wayward-cloud-revoke-result',
-        nonce,
-        revoked: false,
-        error: String(error && error.message || error)
-      });
-    }
-  }
+    connectButton.disabled = true;
+    selectButton.disabled = true;
+    setAccountStatus('Google 계정 선택 및 Drive appData 권한을 요청하고 있습니다.');
+    setStatus('Google 인증 UI를 여는 중…');
 
-  function hasDriveScope(response) {
     try {
-      if (google.accounts.oauth2.hasGrantedAllScopes(response, DRIVE_SCOPE)) return true;
-    } catch (_) {}
-    return String(response && response.scope || '').split(/\s+/).includes(DRIVE_SCOPE);
-  }
-
-  function beginLogin() {
-    if (!ready || !originConfirmed || finished || mode === 'revoke') return;
-    button.disabled = true;
-    status('Google 계정 선택 및 Drive 앱 데이터 접근 권한을 요청합니다.');
-    try {
-      googleTokenClient = google.accounts.oauth2.initTokenClient({
+      const client = google.accounts.oauth2.initTokenClient({
         client_id: clientId,
         scope: DRIVE_SCOPE,
         include_granted_scopes: true,
         callback: response => {
           if (!response || response.error || !response.access_token) {
-            sendError(response && (response.error_description || response.error) ||
-              'Google 액세스 토큰을 받지 못했습니다.', response && response.error);
+            const code = String(response && response.error || 'token-error');
+            if (code === 'access_denied') {
+              sendStatus('consent-denied', 'Google 계정 또는 Drive 권한 승인이 거부되었습니다.');
+              setStatus('Google 계정 또는 권한 승인이 거부되었습니다.', true);
+            } else {
+              sendStatus('reauth-required', response && (response.error_description || response.error) || 'Google 액세스 토큰을 받지 못했습니다.');
+              setStatus('Google 인증에 실패했습니다.', true);
+            }
+            updateButtons();
             return;
           }
-          if (response.state !== nonce) {
-            sendError('Google 인증 응답 state가 현재 요청과 일치하지 않습니다.', 'state_mismatch');
+          let granted = false;
+          try { granted = google.accounts.oauth2.hasGrantedAllScopes(response, DRIVE_SCOPE); }
+          catch (_) {}
+          if (!granted) {
+            granted = String(response.scope || '').split(/\s+/).includes(DRIVE_SCOPE);
+          }
+          if (!granted) {
+            sendStatus('scope-missing', 'Google Drive appData 권한이 승인 scope에 포함되지 않았습니다.');
+            setStatus('Google Drive appData 권한이 부족합니다. 권한을 다시 승인하세요.', true);
+            updateButtons();
             return;
           }
-          if (!hasDriveScope(response)) {
-            sendError('Google Drive 앱 데이터(appDataFolder) 권한이 승인되지 않았습니다.', 'scope_missing');
+          try {
+            window.WaywardCloudSaveDrive.setAccessToken(response.access_token, response.expires_in);
+          } catch (error) {
+            sendStatus('reauth-required', String(error && error.message || error));
+            setStatus('Google 토큰을 설정하지 못했습니다.', true);
+            updateButtons();
             return;
           }
-          const expiresIn = Math.max(60, Math.min(3600, Number(response.expires_in) || 3600));
-          const result = {
-            type: 'wayward-cloud-auth-success',
-            nonce,
-            accessToken: String(response.access_token),
-            expiresIn,
-            scope: DRIVE_SCOPE
-          };
-          finished = true;
-          deliver(result);
+          connected = true;
+          const seconds = Math.max(60, Math.min(3600, Number(response.expires_in) || 3600));
+          if (tokenTimer !== null) clearTimeout(tokenTimer);
+          tokenTimer = setTimeout(() => {
+            clearPageToken();
+            sendStatus('reauth-required', 'Google 액세스 토큰이 만료되었습니다. 이 페이지에서 다시 연결하세요.');
+            setDriveStatus('액세스 토큰 만료 — 재인증 필요', true);
+            setStatus('Google 인증이 만료되었습니다. 연결 버튼을 눌러 갱신하세요.', true);
+          }, Math.max(1000, (seconds - 15) * 1000));
+          updateButtons();
+          sendStatus('connected', 'Google 계정 연결 및 Drive appData 권한 승인이 완료되었습니다.');
+          setDriveStatus('Google Drive에 연결됨');
+          setStatus('연결되었습니다. Drive 작업은 이 페이지에서 직접 처리됩니다.');
         },
         error_callback: error => {
-          const code = String(error && error.type || 'popup_error');
-          sendError(code === 'popup_closed'
-            ? 'Google 계정 선택 창이 닫혔습니다.'
-            : 'Google 인증 창을 열지 못했습니다. 팝업 정책을 확인하세요.', code);
+          const type = String(error && error.type || 'popup_error');
+          if (type === 'popup_closed') {
+            sendStatus('auth-cancelled', 'Google 계정 선택 창이 닫혔습니다.');
+            setStatus('Google 인증 창이 닫혔습니다.', true);
+          } else if (type === 'popup_failed_to_open') {
+            sendStatus('popup-blocked', '브라우저가 Google 인증 팝업을 차단했습니다.');
+            setStatus('Google 인증 팝업이 차단되었습니다. 이 페이지의 팝업을 허용하세요.', true);
+          } else {
+            sendStatus('reauth-required', type);
+            setStatus('Google 인증 UI를 열지 못했습니다: ' + type, true);
+          }
+          updateButtons();
         }
       });
-
-      // Must be called synchronously from this button's user gesture.
-      googleTokenClient.requestAccessToken({
-        prompt: loginPolicy === 'select_account' ? 'select_account' : '',
-        state: nonce
-      });
+      client.requestAccessToken({ prompt: forceSelectAccount ? 'select_account' : '' });
     } catch (error) {
-      sendError(String(error && error.message || error), 'request_failed');
+      sendStatus('reauth-required', String(error && error.message || error));
+      setStatus('Google 인증을 시작하지 못했습니다.', true);
+      updateButtons();
     }
+  }
+
+  function explicitLogout() {
+    if (window.WaywardCloudSaveDrive) window.WaywardCloudSaveDrive.clearAccessToken();
+    connected = false;
+    clearTokenTimer();
+    sendStatus('logged-out', '이 페이지의 메모리에서 Google 액세스 토큰을 삭제했습니다. Google 앱 권한 동의는 유지됩니다.');
+    setDriveStatus('로그아웃됨');
+    setStatus('명시적 로그아웃을 완료했습니다. Google 권한 동의는 철회하지 않았습니다.');
+    updateButtons();
+  }
+
+  function onConfirmChanged() {
+    userConfirmed = confirmBox.checked;
+    if (userConfirmed && openerSeen && !ready && openerAlive()) {
+      ready = true;
+      sendToGame('wayward-cloudsave-ready', { sessionId });
+      setStatus('게임과 보안 세션이 연결되었습니다. Google 계정 연결을 진행하세요.');
+      setAccountStatus('Google 인증을 시작할 준비가 되었습니다.');
+    } else if (!userConfirmed) {
+      ready = false;
+      clearPageToken();
+      setStatus('게임 창에 Drive 명령을 허용하지 않았습니다.');
+    }
+    updateButtons();
   }
 
   function waitForGIS(deadline) {
     if (window.google && google.accounts && google.accounts.oauth2 &&
         typeof google.accounts.oauth2.initTokenClient === 'function') {
-      ready = true;
-      if (mode === 'revoke') {
-        button.disabled = true;
-        button.textContent = 'Google 권한 철회 응답 대기';
-        status(openerVerified
-          ? '게임에서 권한 철회 요청을 기다리고 있습니다.'
-          : '게임으로 돌아가 CloudSave의 권한 철회를 다시 실행하세요.');
-      } else {
-        status(originConfirmed
-          ? 'Google 계정 연결을 시작할 수 있습니다.'
-          : '계속하려면 실행 환경 확인란을 선택하세요.');
-      }
-      updateControls();
+      setStatus(ready ? 'Google 인증을 시작할 준비가 되었습니다.' : 'Wayward 팝업 연결 및 사용자 확인을 기다리고 있습니다.');
+      updateButtons();
       return;
     }
     if (Date.now() >= deadline) {
-      status('Google Identity 라이브러리를 불러오지 못했습니다. 네트워크 연결을 확인하세요.', true);
-      button.disabled = true;
+      setStatus('Google Identity 라이브러리를 불러오지 못했습니다. 네트워크 또는 CSP 설정을 확인하세요.', true);
+      connectButton.disabled = true;
+      selectButton.disabled = true;
       return;
     }
-    setTimeout(() => waitForGIS(deadline), 80);
+    setTimeout(() => waitForGIS(deadline), 100);
   }
 
-  // The static page announces readiness only after its document and listener
-  // exist. The game validates this message's exact popup source, Pages origin,
-  // and nonce before sending the hello handshake back.
-  window.addEventListener('message', onParentMessage);
-
-  if (!nonceValid || !originValid) {
-    originTitle.textContent = '잘못된 인증 요청';
-    originDetail.textContent = '게임에서 전달된 origin 또는 192-bit nonce 형식이 올바르지 않습니다.';
-    status('인증 요청을 시작할 수 없습니다.', true);
-    button.disabled = true;
+  if (!nonceValid || !originValid || !/^[^@\s]+\.apps\.googleusercontent\.com$/.test(clientId)) {
+    failClosed('잘못된 인증 요청입니다. 게임에서 Google 연결을 다시 시작하세요.');
     return;
   }
 
-  if (fileMode) {
-    confirmCopy.textContent = 'opaque origin인 file:// 게임에서 제가 직접 Google 연결을 시작했습니다.';
-  } else if (!hasOpener()) {
-    confirmCopy.textContent = '표시된 게임 origin에서 제가 직접 시작한 일회성 인증 요청입니다: ' + gameOrigin;
-  } else {
-    confirmCopy.textContent = '이 인증 요청을 Wayward 게임에서 직접 시작했습니다: ' + gameOrigin;
+  if (!openerAlive()) {
+    failClosed('원래 Wayward 게임 창을 찾지 못했습니다. 게임에서 인증 팝업을 다시 여세요.');
+    return;
   }
 
-  // A nonce-bound hello from the actual opener is required for automatic
-  // delivery. A user confirmation enables the copy/paste path when the opener
-  // is absent or has been severed by an external browser.
   confirmWrap.hidden = false;
-  originConfirmed = false;
-  confirmCopy.textContent = fileMode
-    ? 'opaque origin인 file:// 게임에서 제가 직접 Google 연결을 시작했습니다.'
-    : '이 주소의 Wayward 게임에서 제가 직접 시작한 인증 요청입니다: ' + gameOrigin;
-  confirmBox.addEventListener('change', () => {
-    originConfirmed = confirmBox.checked;
-    updateControls();
-    status(originConfirmed
-      ? '실행 환경 확인을 완료했습니다. 자동 전달 또는 수동 복구를 사용할 수 있습니다.'
-      : 'Google 인증을 시작하려면 확인란을 선택하세요.');
+  confirmBox.addEventListener('change', onConfirmChanged);
+  connectButton.addEventListener('click', () => beginConnection(false));
+  selectButton.addEventListener('click', () => beginConnection(true));
+  logoutButton.addEventListener('click', explicitLogout);
+  revokeButton.addEventListener('click', async () => {
+    if (!connected || !window.WaywardCloudSaveDrive) return;
+    revokeButton.disabled = true;
+    setDriveStatus('Google에 권한 철회를 요청하는 중…');
+    const result = await window.WaywardCloudSaveDrive.revokeAccess(
+      (token, callback) => google.accounts.oauth2.revoke(token, callback)
+    );
+    connected = false;
+    updateButtons();
+    if (result && result.successful === true) {
+      sendStatus('permission-revoked', 'Google에서 앱 권한 철회를 확인했습니다.');
+      setDriveStatus('Google 앱 권한이 철회되었습니다.');
+      setStatus('Google 앱 권한 철회를 완료했습니다.');
+    } else {
+      sendStatus('revoke-failed', 'Google 권한 철회 성공 응답을 받지 못했습니다.');
+      setDriveStatus('권한 철회가 확인되지 않았습니다.', true);
+      setStatus('Google 앱 권한 철회에 실패했거나 결과가 확인되지 않았습니다.', true);
+    }
   });
-  if (hasOpener()) {
-    originTitle.textContent = 'Wayward 게임 연결 요청 확인 중';
-    originDetail.textContent = fileMode
-      ? 'file://의 opaque origin은 사용자가 확인해야 합니다. 게임과 nonce 연결도 함께 확인합니다.'
-      : '게임의 실제 origin과 nonce 연결을 확인하고 있습니다.';
-  } else {
-    originTitle.textContent = '외부 브라우저 수동 복구 모드';
-    originDetail.textContent = '게임 창으로 자동 전달할 수 없으면 인증 결과를 복사해 CloudSave에 붙여 넣습니다.';
-  }
 
-  if (!/^[^@\s]+\.apps\.googleusercontent\.com$/.test(clientId)) {
-    status('Google OAuth 공개 Client ID 설정이 올바르지 않습니다.', true);
-    button.disabled = true;
+  window.addEventListener('message', onParentMessage);
+  window.addEventListener('pagehide', clearPageToken);
+
+  // Announce readiness only after the exact HTTPS page has installed its
+  // receiver. The opener validates this source WindowProxy, origin and nonce.
+  try {
+    window.opener.postMessage(baseMessage('wayward-cloudsave-page-ready'), targetGameOrigin());
+  } catch (_) {
+    failClosed('Wayward 게임 창에 연결 준비 메시지를 보내지 못했습니다.');
     return;
   }
 
-  if (mode === 'revoke') {
-    button.hidden = true;
-    if (!hasOpener()) {
-      confirmWrap.hidden = true;
-      originDetail.textContent = '외부 브라우저에서는 원래 게임의 권한 철회 요청을 받을 수 없습니다. 게임에서 다시 시도하거나 Google 계정 권한 관리 페이지를 이용하세요.';
-      const link = document.createElement('a');
-      link.href = 'https://myaccount.google.com/permissions';
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
-      link.textContent = 'Google 계정 앱 권한 관리';
-      $('connection').append(link);
+  popupWatchTimer = setInterval(() => {
+    if (!openerAlive()) {
+      clearTokenTimer();
+      clearPageToken();
+      if (popupWatchTimer !== null) clearInterval(popupWatchTimer);
+      popupWatchTimer = null;
+      failClosed('Wayward 게임 창이 닫혀 연결을 종료했습니다. 토큰은 메모리에서 삭제했습니다.');
     }
-  } else {
-    button.addEventListener('click', beginLogin);
-  }
+  }, 1000);
 
-  $('copy').addEventListener('click', async () => {
-    const text = payloadBox.value;
-    if (!text) return;
-    try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(text);
-        status('인증 응답을 클립보드에 복사했습니다. Wayward로 돌아가 붙여 넣으세요.');
-        return;
-      }
-    } catch (_) {}
-    payloadBox.focus();
-    payloadBox.select();
-    status('자동 복사를 사용할 수 없습니다. 선택된 내용을 길게 눌러 복사하세요.');
-  });
-
-  $('select').addEventListener('click', () => {
-    payloadBox.focus();
-    payloadBox.select();
-    status('전체 응답을 선택했습니다. 길게 눌러 복사하세요.');
-  });
-
-  // Do not race the about:blank popup. Announce page readiness from this
-  // HTTPS document; the opener must validate origin/source/nonce and reply.
-  if (hasOpener() && nonceValid && originValid) {
-    try {
-      window.opener.postMessage({
-        type: 'wayward-cloud-auth-page-ready',
-        nonce
-      }, fileMode ? '*' : gameOrigin);
-    } catch (_) {}
-  }
-
-  waitForGIS(Date.now() + 15000);
+  waitForGIS(Date.now() + 20000);
 })();
