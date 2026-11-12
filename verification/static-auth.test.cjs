@@ -407,12 +407,15 @@ test('static page uses the exact existing public Web Client ID and has no refres
   assert.ok(authSource.includes('event.source === window.opener'));
   assert.ok(authSource.includes('event.origin === expectedEventOrigin'));
   assert.ok(authSource.includes('nativeTransportRequested'));
-  assert.ok(authSource.includes("event.type !== 'message'") === false);
   assert.ok(authSource.includes("init.type !== 'wayward-cloudsave-cct-init'"));
   assert.ok(authSource.includes('event.ports.length !== 1'));
   assert.ok(authSource.includes('nativePort.postMessage(payload)'));
+  assert.ok(authSource.includes('nativePort.postMessage(raw)'));
+  assert.ok(authSource.includes('event.origin !== AUTH_ORIGIN'));
+  assert.ok(authSource.includes('event.ports.length !== 1'));
+  assert.ok(authSource.includes("if (!nativeTransportRequested && !openerAlive())"));
+  assert.ok(authSource.includes("data.type === 'wayward-cloudsave-native-close'"));
   assert.ok(authSource.includes('window.addEventListener(\'message\', onParentMessage)'));
-  assert.ok(authSource.includes('nativeTransportRequested && !openerAlive()') === false);
   assert.ok(authSource.includes('nativeTransportRequested'));
   assert.ok(authSource.includes('seenRequestIds.has(data.requestId)'));
 });
