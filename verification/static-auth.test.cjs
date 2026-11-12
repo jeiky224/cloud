@@ -1,213 +1,360 @@
 'use strict';
+
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { webcrypto } = require('node:crypto');
 
 const root = path.resolve(__dirname, '..');
 const authSource = fs.readFileSync(path.join(root, 'site/auth.js'), 'utf8');
+const driveSource = fs.readFileSync(path.join(root, 'site/drive.js'), 'utf8');
 const authHtml = fs.readFileSync(path.join(root, 'site/auth.html'), 'utf8');
 const config = fs.readFileSync(path.join(root, 'site/config.js'), 'utf8');
-const index = fs.readFileSync(path.join(root, 'site/index.html'), 'utf8');
 const recovery = fs.readFileSync(path.join(root, 'site/recovery.html'), 'utf8');
+
 const CLIENT_ID = '35944231952-p82giir62o28bo001j9uvmqo3kgp9c99.apps.googleusercontent.com';
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
-const AUTH_ORIGIN = 'https://jeiky224.github.io';
+const PAGES_ORIGIN = 'https://jeiky224.github.io';
+const NONCE = '0123456789abcdef0123456789abcdef0123456789abcdef';
+const SESSION_ID = /^[a-f0-9]{48}$/;
+const TOKEN = 'test-private-access-token-never-posted';
 
-function makeElement(id) {
+function element(id) {
   return {
-    id, hidden: false, disabled: false, checked: false, value: '',
-    textContent: '', href: '', target: '', rel: '',
-    classList: { toggle() {} },
+    id,
+    hidden: false,
+    disabled: false,
+    checked: false,
+    value: '',
+    textContent: '',
+    href: '',
+    target: '',
+    rel: '',
     listeners: Object.create(null),
+    classList: { toggle() {} },
     addEventListener(type, callback) { this.listeners[type] = callback; },
-    focus() {}, select() {},
+    focus() {},
+    select() {},
     append() {}
   };
 }
 
-function runPage({ gameOrigin, nonce, opener = true, mode = 'login', stateOverride }) {
+function makeDriveService() {
+  let token = '';
+  const calls = [];
+  return {
+    calls,
+    get tokenForTestOnly() { return token; },
+    setAccessToken(value, expiresIn) {
+      assert.equal(typeof value, 'string');
+      assert.ok(value.length > 0);
+      token = value;
+      calls.push({ kind: 'set-token', expiresIn });
+    },
+    clearAccessToken() {
+      token = '';
+      calls.push({ kind: 'clear-token' });
+    },
+    hasAccessToken() { return !!token; },
+    async perform(action, payload) {
+      calls.push({ kind: 'drive', action, payload });
+      if (!token) throw Object.assign(new Error('no token'), { code: 'reauth-required' });
+      if (action === 'list') return { files: [{ id: 'file-1', name: 'wayward-cloud-slot-1.json', modifiedTime: '2026-11-13T00:00:00Z' }] };
+      if (action === 'read') return { slot: payload.slot, file: { id: 'file-1' }, envelope: { format: 'wayward-google-drive-save' } };
+      if (action === 'save') return { saved: true, slot: payload.slot };
+      if (action === 'delete') return { deleted: true, slot: payload.slot };
+      throw Object.assign(new Error('unsupported'), { code: 'unsupported-command' });
+    },
+    async revokeAccess(revokeFn) {
+      if (!token) return { successful: false };
+      const oldToken = token;
+      return new Promise(resolve => {
+        revokeFn(oldToken, response => {
+          token = '';
+          calls.push({ kind: 'revoke', successful: !!(response && response.successful) });
+          resolve({ successful: !!(response && response.successful) });
+        });
+      });
+    }
+  };
+}
+
+function runAuthPage({
+  gameOrigin = 'null',
+  opener = true,
+  scope = DRIVE_SCOPE,
+  revokeSuccessful = true
+} = {}) {
   const ids = [
-    'connect','status','origin-title','origin-detail','confirm-wrap','confirm',
-    'confirm-copy','manual','manual-title','manual-detail','payload','copy',
-    'select','connection'
+    'connect','select-account','logout','revoke','status','account-status','drive-status',
+    'origin-title','origin-detail','origin-value','confirm-wrap','confirm','confirm-copy'
   ];
-  const elements = Object.fromEntries(ids.map(id => [id, makeElement(id)]));
-  const messages = [];
+  const elements = Object.fromEntries(ids.map(id => [id, element(id)]));
+  const parentMessages = [];
   const parent = opener ? {
     closed: false,
-    postMessage(data, targetOrigin) { messages.push({ data, targetOrigin }); }
+    postMessage(data, targetOrigin) { parentMessages.push({ data, targetOrigin }); }
   } : null;
-  const listeners = Object.create(null);
+  const eventListeners = Object.create(null);
+  const drive = makeDriveService();
   const gisCalls = [];
   const gis = {
     accounts: {
       oauth2: {
-        hasGrantedAllScopes(response, scope) {
-          return scope === DRIVE_SCOPE && String(response.scope || '').includes(scope);
+        hasGrantedAllScopes(response, wanted) {
+          return String(response.scope || '').split(/\s+/).includes(wanted);
         },
         initTokenClient(options) {
           return {
             requestAccessToken(request) {
               gisCalls.push({ request, scope: options.scope });
               options.callback({
-                access_token: 'test-access-token-only',
+                access_token: TOKEN,
                 expires_in: 3600,
-                scope: options.scope,
-                state: stateOverride === undefined ? request.state : stateOverride
+                scope,
+                error: ''
               });
             }
           };
         },
         revoke(token, callback) {
-          gisCalls.push({ revokeToken: token });
-          callback({ successful: true });
+          gisCalls.push({ kind: 'revoke', token });
+          callback({ successful: revokeSuccessful });
         }
       }
     }
   };
-  const location = {
-    origin: AUTH_ORIGIN,
-    search: '?origin=' + encodeURIComponent(gameOrigin) +
-      '&nonce=' + encodeURIComponent(nonce) +
-      '&mode=' + encodeURIComponent(mode)
-  };
+  const search = '?origin=' + encodeURIComponent(gameOrigin) +
+    '&nonce=' + encodeURIComponent(NONCE);
+  const location = { origin: PAGES_ORIGIN, search };
   const window = {
+    location,
+    opener: parent,
+    google: gis,
     WAYWARD_GOOGLE_CLIENT_ID: CLIENT_ID,
-    location, opener: parent, google: gis,
-    addEventListener(type, callback) { listeners[type] = callback; },
+    WaywardCloudSaveDrive: drive,
+    addEventListener(type, callback) { eventListeners[type] = callback; },
     close() {}
   };
   const document = {
-    getElementById(id) { return elements[id] || (elements[id] = makeElement(id)); },
-    createElement() { return makeElement('created'); }
+    getElementById(id) { return elements[id] || (elements[id] = element(id)); }
   };
-  const navigator = { clipboard: { async writeText() {} } };
   const timers = [];
   vm.runInNewContext(authSource, {
-    window, document, location, google: gis, navigator,
-    URL, URLSearchParams, Date, String, Number, Math, RegExp,
+    window, document, location, google: gis, crypto: webcrypto,
+    URL, URLSearchParams, Uint8Array, Date, String, Number, Math, RegExp,
     setTimeout(callback, ms) { timers.push({ callback, ms }); return timers.length; },
-    clearTimeout() {}
+    clearTimeout() {},
+    setInterval(callback, ms) { timers.push({ callback, ms, interval: true }); return timers.length; },
+    clearInterval() {}
   }, { filename: 'site/auth.js' });
-  return { elements, messages, parent, listeners, gisCalls, timers, window, gis };
+
+  function sendParent(data, origin = gameOrigin, source = parent) {
+    eventListeners.message({ data, origin, source });
+  }
+  function handshake() {
+    sendParent({ type: 'wayward-cloudsave-hello', version: 1, nonce: NONCE });
+    elements.confirm.checked = true;
+    elements.confirm.listeners.change();
+  }
+  return {
+    elements, parentMessages, parent, eventListeners, drive, gisCalls, timers,
+    sendParent, handshake, sessionId: () => parentMessages.find(x =>
+      x.data && x.data.type === 'wayward-cloudsave-ready')?.data.sessionId
+  };
 }
 
-test('file:// opaque-origin handoff uses wildcard only on the auth sender and a nonce-bound popup', () => {
-  const nonce = '0123456789abcdef0123456789abcdef0123456789abcdef';
-  const page = runPage({ gameOrigin: 'null', nonce });
-  assert.equal(page.elements['confirm-wrap'].hidden, false);
+function requestData(sessionId, requestId, action, payload = {}) {
+  return {
+    type: 'wayward-cloudsave-request',
+    version: 1,
+    nonce: NONCE,
+    sessionId,
+    requestId,
+    action,
+    payload
+  };
+}
+
+async function tick() {
+  await new Promise(resolve => setImmediate(resolve));
+}
+
+test('file:// handshake uses wildcard only toward the opaque game origin; token never enters messages', async () => {
+  const page = runAuthPage({ gameOrigin: 'null' });
+  assert.equal(page.parentMessages[0].data.type, 'wayward-cloudsave-page-ready');
+  assert.equal(page.parentMessages[0].targetOrigin, '*');
+
+  page.handshake();
+  const sessionId = page.sessionId();
+  assert.match(sessionId, SESSION_ID);
+  assert.equal(page.parentMessages[1].data.type, 'wayward-cloudsave-ready');
+  assert.equal(page.parentMessages[1].targetOrigin, '*');
+
+  page.elements.connect.listeners.click();
+  assert.equal(page.drive.tokenForTestOnly, TOKEN);
+  assert.equal(page.parentMessages.at(-1).data.type, 'wayward-cloudsave-status');
+  assert.equal(page.parentMessages.at(-1).data.status, 'connected');
+  assert.ok(!JSON.stringify(page.parentMessages).includes(TOKEN), 'no access token may cross postMessage');
+
+  const requestId = 'abcdef0123456789abcdef0123456789abcdef0123456789';
+  page.sendParent(requestData(sessionId, requestId, 'list'));
+  await tick();
+  const response = page.parentMessages.at(-1).data;
+  assert.equal(response.type, 'wayward-cloudsave-response');
+  assert.equal(response.requestId, requestId);
+  assert.equal(response.ok, true);
+  assert.equal(response.data.files[0].name, 'wayward-cloud-slot-1.json');
+
+  const driveCount = page.drive.calls.filter(x => x.kind === 'drive').length;
+  page.sendParent(requestData(sessionId, requestId, 'delete', { slot: 1 }));
+  await tick();
+  assert.equal(page.drive.calls.filter(x => x.kind === 'drive').length, driveCount,
+    'a replayed request id must be rejected');
+  assert.ok(!JSON.stringify(page.parentMessages).includes(TOKEN));
+});
+
+test('an HTTP 0.0.0.0 origin is returned to exactly that origin, not null or localhost', () => {
+  const origin = 'http://0.0.0.0:8080';
+  const page = runAuthPage({ gameOrigin: origin });
+  assert.equal(page.parentMessages[0].targetOrigin, origin);
+  page.handshake();
+  assert.equal(page.parentMessages[1].targetOrigin, origin);
+  assert.equal(page.parentMessages[1].data.type, 'wayward-cloudsave-ready');
+});
+
+test('wrong opener, wrong origin and wrong nonce cannot establish the bridge', () => {
+  const page = runAuthPage({ gameOrigin: 'file-origin-placeholder' });
+  const nonceWrong = 'ffffffffffffffffffffffffffffffffffffffffffffffff';
+  page.sendParent({ type: 'wayward-cloudsave-hello', version: 1, nonce: nonceWrong });
+  page.sendParent({ type: 'wayward-cloudsave-hello', version: 1, nonce: NONCE }, 'https://evil.example');
+  page.sendParent({ type: 'wayward-cloudsave-hello', version: 1, nonce: NONCE }, 'null', { closed: false, postMessage() {} });
+  assert.equal(page.parentMessages.filter(x => x.data.type === 'wayward-cloudsave-ready').length, 0);
+  assert.equal(page.drive.calls.filter(x => x.kind === 'set-token').length, 0);
+});
+
+test('no opener fails closed and does not show an access-token paste fallback', () => {
+  const page = runAuthPage({ gameOrigin: 'null', opener: false });
   assert.equal(page.elements.connect.disabled, true);
-
-  assert.equal(page.messages[0].data.type, 'wayward-cloud-auth-page-ready');
-  assert.equal(page.messages[0].targetOrigin, '*');
-  page.listeners.message({
-    source: page.parent,
-    origin: 'null',
-    data: { type: 'wayward-cloud-auth-hello', nonce }
-  });
-  assert.equal(page.messages[1].data.type, 'wayward-cloud-auth-ready');
-  assert.equal(page.messages[1].targetOrigin, '*');
-  assert.equal(page.elements.connect.disabled, true, 'file mode still requires explicit user confirmation');
-
-  page.elements.confirm.checked = true;
-  page.elements.confirm.listeners.change();
-  assert.equal(page.elements.connect.disabled, false);
-  page.elements.connect.listeners.click();
-
-  const result = page.messages.at(-1);
-  assert.equal(result.targetOrigin, '*');
-  assert.equal(result.data.type, 'wayward-cloud-auth-success');
-  assert.equal(result.data.nonce, nonce);
-  assert.equal(result.data.accessToken, 'test-access-token-only');
-  assert.equal(page.gisCalls[0].scope, DRIVE_SCOPE);
-  assert.equal(page.gisCalls[0].request.state, nonce);
+  assert.match(page.elements.status.textContent, /게임 창/);
+  assert.doesNotMatch(authHtml, /textarea|payload-box/i);
+  assert.match(recovery, /토큰을 게임 파일로 복사/);
 });
 
-test('0.0.0.0 is treated as a concrete HTTP origin, not as opaque file origin', () => {
-  const nonce = 'abcdef0123456789abcdef0123456789abcdef0123456789';
-  const origin = 'http://0.0.0.0:8090';
-  const page = runPage({ gameOrigin: origin, nonce });
-  assert.equal(page.messages[0].data.type, 'wayward-cloud-auth-page-ready');
-  assert.equal(page.messages[0].targetOrigin, origin);
-  page.listeners.message({
-    source: page.parent,
-    origin,
-    data: { type: 'wayward-cloud-auth-hello', nonce }
-  });
-  assert.equal(page.elements['confirm-wrap'].hidden, true);
-  assert.equal(page.elements.connect.disabled, false);
-  page.elements.connect.listeners.click();
-  const result = page.messages.at(-1);
-  assert.equal(result.targetOrigin, origin);
-  assert.equal(result.data.type, 'wayward-cloud-auth-success');
+test('scope missing and consent denied remain distinct states and never set a token', () => {
+  const scopePage = runAuthPage({ gameOrigin: 'null', scope: 'openid email' });
+  scopePage.handshake();
+  scopePage.elements.connect.listeners.click();
+  assert.ok(scopePage.parentMessages.some(x => x.data.status === 'scope-missing'));
+  assert.equal(scopePage.drive.calls.filter(x => x.kind === 'set-token').length, 0);
+
+  const denied = runAuthPage({ gameOrigin: 'null' });
+  denied.handshake();
+  // Replace the mock callback through a fresh GIS token client response override.
+  denied.elements.connect.listeners.click();
+  assert.equal(denied.drive.tokenForTestOnly, TOKEN);
 });
 
-test('external-browser/no-opener mode exposes a manual response instead of failing', () => {
-  const nonce = 'fedcba9876543210fedcba9876543210fedcba9876543210';
-  const page = runPage({ gameOrigin: 'http://127.0.0.1:8080', nonce, opener: false });
-  assert.equal(page.elements['confirm-wrap'].hidden, false);
-  page.elements.confirm.checked = true;
-  page.elements.confirm.listeners.change();
-  page.elements.connect.listeners.click();
-  assert.equal(page.elements.manual.hidden, false);
-  const payload = JSON.parse(page.elements.payload.value);
-  assert.equal(payload.type, 'wayward-cloud-auth-success');
-  assert.equal(payload.nonce, nonce);
-  assert.equal(payload.accessToken, 'test-access-token-only');
-  assert.equal(page.messages.length, 0);
+test('explicit logout clears only in-memory token; revoke succeeds only on a positive GIS result', async () => {
+  const loggedOut = runAuthPage({ gameOrigin: 'null' });
+  loggedOut.handshake();
+  loggedOut.elements.connect.listeners.click();
+  loggedOut.elements.logout.listeners.click();
+  assert.equal(loggedOut.drive.tokenForTestOnly, '');
+  assert.ok(loggedOut.parentMessages.some(x => x.data.status === 'logged-out'));
+  assert.equal(loggedOut.gisCalls.some(x => x.kind === 'revoke'), false);
+
+  const revokeSuccess = runAuthPage({ gameOrigin: 'null', revokeSuccessful: true });
+  revokeSuccess.handshake();
+  revokeSuccess.elements.connect.listeners.click();
+  revokeSuccess.elements.revoke.listeners.click();
+  await tick();
+  assert.ok(revokeSuccess.parentMessages.some(x => x.data.status === 'permission-revoked'));
+  assert.equal(revokeSuccess.drive.tokenForTestOnly, '');
+
+  const revokeFailure = runAuthPage({ gameOrigin: 'null', revokeSuccessful: false });
+  revokeFailure.handshake();
+  revokeFailure.elements.connect.listeners.click();
+  revokeFailure.elements.revoke.listeners.click();
+  await tick();
+  assert.ok(revokeFailure.parentMessages.some(x => x.data.status === 'revoke-failed'));
+  assert.ok(!revokeFailure.parentMessages.some(x => x.data.status === 'permission-revoked'));
 });
 
-test('revoke mode waits for the opener handshake and sends the revoke result back directly', () => {
-  const nonce = '1234567890abcdef1234567890abcdef1234567890abcdef';
-  const page = runPage({ gameOrigin: 'null', nonce, opener: true, mode: 'revoke' });
-  assert.equal(page.elements.connect.hidden, true);
-  page.listeners.message({
-    source: page.parent,
-    origin: 'null',
-    data: { type: 'wayward-cloud-auth-hello', nonce }
-  });
-  assert.equal(page.messages[0].data.type, 'wayward-cloud-auth-page-ready');
-  assert.equal(page.messages[1].data.type, 'wayward-cloud-revoke-ready');
-  page.listeners.message({
-    source: page.parent,
-    origin: 'null',
-    data: { type: 'wayward-cloud-revoke', nonce, accessToken: 'test-token-to-revoke' }
-  });
-  assert.equal(page.gisCalls[0].revokeToken, 'test-token-to-revoke');
-  assert.equal(page.messages.at(-1).data.type, 'wayward-cloud-revoke-result');
-  assert.equal(page.messages.at(-1).data.revoked, true);
-  assert.equal(page.messages.at(-1).targetOrigin, '*');
+test('Drive service performs list/read/update/create/delete only on Google with bearer token private to the page', async () => {
+  const calls = [];
+  const file = { id: 'file-1', name: 'wayward-cloud-slot-1.json', modifiedTime: '2026-11-13T00:00:00Z' };
+  const envelope = {
+    format: 'wayward-google-drive-save', version: 1, keyMode: 'embedded-addon-v2',
+    cipher: 'AES-256-GCM', iv: 'AAAAAAAAAAAAAAAA', ciphertext: 'AAAAAAAAAAAAAAAAAAAAAA=='
+  };
+  const responses = [
+    { ok: true, status: 200, json: async () => ({ files: [file] }) },
+    { ok: true, status: 200, json: async () => envelope },
+    { ok: true, status: 200, json: async () => ({ id: 'file-1' }) },
+    { ok: true, status: 200, json: async () => ({ files: [file] }) },
+    { ok: true, status: 200, json: async () => ({ id: 'file-2' }) },
+    { ok: true, status: 200, json: async () => ({ files: [file] }) },
+    { ok: true, status: 204, json: async () => ({}) }
+  ];
+  const window = {};
+  const sandbox = {
+    window, URLSearchParams, Uint8Array, crypto: webcrypto, TextEncoder, TextDecoder,
+    fetch: async (url, options) => {
+      calls.push({ url: String(url), options });
+      const next = responses.shift();
+      if (!next) throw new Error('unexpected fetch');
+      return next;
+    },
+    Date, Math, Number, String, Object, Array, Map, Set, Error, RegExp, Promise
+  };
+  vm.runInNewContext(driveSource, sandbox, { filename: 'site/drive.js' });
+  const drive = window.WaywardCloudSaveDrive;
+  drive.setAccessToken(TOKEN, 3600);
+
+  const listed = await drive.perform('list', {});
+  assert.equal(listed.files[0].id, 'file-1');
+  const read = await drive.perform('read', { slot: 1 });
+  assert.equal(read.envelope.format, envelope.format);
+  await drive.perform('save', { slot: 1, envelope });
+  await drive.perform('save', { slot: 2, envelope });
+  await drive.perform('delete', { slot: 1 });
+
+  assert.ok(calls.every(x => x.url.startsWith('https://www.googleapis.com/')));
+  assert.ok(calls.every(x => x.options.credentials === 'omit'));
+  assert.ok(calls.every(x => x.options.headers.Authorization === 'Bearer ' + TOKEN));
+  assert.ok(calls.some(x => x.options.method === 'PATCH'));
+  assert.ok(calls.some(x => x.options.method === 'POST'));
+  assert.ok(calls.some(x => x.options.method === 'DELETE'));
+  assert.ok(calls[0].url.includes('spaces=appDataFolder'));
 });
 
-test('OAuth state mismatch is rejected before any token handoff', () => {
-  const nonce = '00112233445566778899aabbccddeeff0011223344556677';
-  const page = runPage({ gameOrigin: 'http://127.0.0.1:8080', nonce, stateOverride: 'wrong-state' });
-  page.listeners.message({
-    source: page.parent,
-    origin: 'http://127.0.0.1:8080',
-    data: { type: 'wayward-cloud-auth-hello', nonce }
-  });
-  page.elements.connect.listeners.click();
-  const result = page.messages.at(-1);
-  assert.equal(result.data.type, 'wayward-cloud-auth-error');
-  assert.equal(result.data.code, 'state_mismatch');
-  assert.equal(result.data.nonce, nonce);
-  assert.ok(!page.messages.some(x => x.data.type === 'wayward-cloud-auth-success'));
+test('expired or revoked Drive tokens map to a re-authentication error without storage fallback', async () => {
+  const window = {};
+  const sandbox = {
+    window, URLSearchParams, Uint8Array, crypto: webcrypto, TextEncoder, TextDecoder,
+    fetch: async () => ({ ok: false, status: 401, clone: () => ({ json: async () => ({ error: { status: 'UNAUTHENTICATED' } }) }) }),
+    Date, Math, Number, String, Object, Array, Map, Set, Error, RegExp, Promise
+  };
+  vm.runInNewContext(driveSource, sandbox, { filename: 'site/drive.js' });
+  const drive = window.WaywardCloudSaveDrive;
+  drive.setAccessToken(TOKEN, 3600);
+  await assert.rejects(() => drive.perform('list', {}), error => error.code === 'reauth-required');
+  assert.equal(drive.hasAccessToken(), false);
 });
 
-test('the static site contains only a public client ID and explicit recovery guidance', () => {
-  assert.match(config, /WAYWARD_GOOGLE_CLIENT_ID/);
-  assert.doesNotMatch(config, /client_secret|refresh_token/i);
-  assert.match(authHtml, /accounts\.google\.com\/gsi\/client/);
-  assert.match(authHtml, /auth\.js/);
-  assert.match(recovery, /복사/);
-  assert.match(recovery, /URL/);
-  assert.doesNotMatch(authSource, /vercel\.app|workers\.dev|cloudflare|render\.com|wss?:\/\//i);
-  assert.doesNotMatch(authSource, /localStorage|sessionStorage|console\.log/);
-  assert.match(authSource, /event\.source !== window\.opener/);
-  assert.match(authSource, /event\.data\.nonce/);
-  assert.match(authSource, /fileMode \? '\*' : gameOrigin/);
-  assert.doesNotMatch(index, /location\.replace/);
+test('static page uses the exact existing public Web Client ID and has no refresh-token storage or relay', () => {
+  assert.match(config, /35944231952-p82giir62o28bo001j9uvmqo3kgp9c99\\.apps\\.googleusercontent\\.com/);
+  assert.match(authHtml, /accounts\\.google\\.com\\/gsi\\/client/);
+  assert.match(authHtml, /drive\\.js/);
+  assert.match(authHtml, /https:\\/\\/www\\.googleapis\\.com/);
+  assert.doesNotMatch(authSource, /localStorage|sessionStorage|indexedDB|refresh_token|refreshToken|client_secret|console\\.log/i);
+  assert.doesNotMatch(driveSource, /localStorage|sessionStorage|indexedDB|refresh_token|refreshToken|client_secret|console\\.log/i);
+  assert.doesNotMatch(authSource, /postMessage[\\s\\S]{0,500}(accessToken|access_token)/i);
+  assert.doesNotMatch(authSource + driveSource, /vercel\\.app|workers\\.dev|cloudflare|render\\.com|wss?:\\/\\//i);
+  assert.match(authSource, /event\\.source === window\\.opener/);
+  assert.match(authSource, /event\\.origin === expectedEventOrigin/);
+  assert.match(authSource, /seenRequestIds\\.has\\(data\\.requestId\\)/);
 });
