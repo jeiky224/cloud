@@ -272,6 +272,18 @@ test('scope missing and consent denied remain distinct states and never set a to
   assert.equal(denied.drive.calls.filter(x => x.kind === 'set-token').length, 0);
 });
 
+test('pagehide notifies the game and destroys its in-memory access token', () => {
+  const page = runAuthPage({ gameOrigin: 'null' });
+  page.handshake();
+  page.elements.connect.listeners.click();
+  assert.equal(page.drive.tokenForTestOnly, TOKEN);
+  assert.equal(typeof page.eventListeners.pagehide, 'function');
+  page.eventListeners.pagehide();
+  assert.equal(page.drive.tokenForTestOnly, '');
+  assert.ok(page.parentMessages.some(x => x.data.status === 'reauth-required'));
+  assert.ok(!JSON.stringify(page.parentMessages).includes(TOKEN));
+});
+
 test('explicit logout clears only in-memory token; revoke succeeds only on a positive GIS result', async () => {
   const loggedOut = runAuthPage({ gameOrigin: 'null' });
   loggedOut.handshake();
@@ -358,6 +370,23 @@ test('expired or revoked Drive tokens map to a re-authentication error without s
   drive.setAccessToken(TOKEN, 3600);
   await assert.rejects(() => drive.perform('list', {}), error => error.code === 'reauth-required');
   assert.equal(drive.hasAccessToken(), false);
+});
+
+test('generic Drive permission denial is not mislabeled as permission revocation', async () => {
+  const window = {};
+  const sandbox = {
+    window, URLSearchParams, Uint8Array, crypto: webcrypto, TextEncoder, TextDecoder,
+    fetch: async () => ({
+      ok: false, status: 403,
+      clone: () => ({ json: async () => ({ error: { status: 'PERMISSION_DENIED', message: 'Policy denied' } }) })
+    }),
+    Date, Math, Number, String, Object, Array, Map, Set, Error, RegExp, Promise
+  };
+  vm.runInNewContext(driveSource, sandbox, { filename: 'site/drive.js' });
+  const drive = window.WaywardCloudSaveDrive;
+  drive.setAccessToken(TOKEN, 3600);
+  await assert.rejects(() => drive.perform('list', {}), error => error.code === 'permission-denied');
+  assert.equal(drive.hasAccessToken(), true, 'a generic 403 must not erase a still-valid token');
 });
 
 test('static page uses the exact existing public Web Client ID and has no refresh-token storage or relay', () => {
