@@ -6,6 +6,7 @@ on:
       - work/cloudsave-pages-drive-owner-20261113
     paths:
       - 'site/**'
+      - 'README.md'
       - '.github/workflows/deploy-pages.yml'
   workflow_dispatch:
 
