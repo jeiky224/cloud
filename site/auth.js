@@ -137,8 +137,8 @@
     confirmBox.checked = false;
     userConfirmed = false;
     confirmCopy.textContent = fileMode
-      ? '제가 직접 file://로 실행한 Wayward 게임에서 연 인증 팝업입니다. 이 게임 창에 Google Drive 명령을 허용합니다.'
-      : '제가 직접 시작한 Wayward 게임의 인증 팝업입니다: ' + gameOrigin;
+      ? 'Wayward 게임에서 직접 시작한 인증 요청입니다. 이 게임 창의 Drive 접근을 허용합니다.'
+      : 'Wayward 게임 인증 요청 · ' + gameOrigin;
     updateButtons();
   }
 
@@ -151,8 +151,8 @@
     logoutButton.disabled = true;
     revokeButton.disabled = true;
     setStatus(message, true);
-    setAccountStatus('게임 팝업과의 신뢰된 연결이 없습니다.', true);
-    setDriveStatus('Drive 요청은 허용되지 않았습니다.', true);
+    setAccountStatus('게임 연결을 확인할 수 없습니다.', true);
+    setDriveStatus('Drive 접근이 차단되었습니다.', true);
   }
 
   function validParentMessage(event, data) {
@@ -232,7 +232,7 @@
 
     if (action === 'logout') {
       clearPageToken();
-      sendStatus('logged-out', '이 페이지의 Google 액세스 토큰을 메모리에서 지웠습니다. Google 앱 권한 동의는 유지됩니다.');
+      sendStatus('logged-out', '로그아웃되었습니다. Google 앱 권한은 유지됩니다.');
       setDriveStatus('로그아웃됨');
       sendResponse(requestId, true, { loggedOut: true });
       return;
@@ -261,11 +261,11 @@
       clearTokenTimer();
       updateButtons();
       if (result && result.successful === true) {
-        sendStatus('permission-revoked', 'Google에서 앱 권한 철회를 확인했습니다.');
+        sendStatus('permission-revoked', 'Google 앱 권한이 해제되었습니다.');
         setDriveStatus('Google 앱 권한이 철회되었습니다.');
         sendResponse(requestId, true, { revoked: true });
       } else {
-        sendStatus('revoke-failed', 'Google 권한 철회 성공 응답을 받지 못했습니다.');
+        sendStatus('revoke-failed', 'Google에서 권한 해제를 확인하지 못했습니다.');
         setDriveStatus('권한 철회가 확인되지 않았습니다.', true);
         sendResponse(requestId, false, null, {
           code: 'revoke-failed',
@@ -279,7 +279,7 @@
         !window.WaywardCloudSaveDrive.hasAccessToken()) {
       connected = false;
       updateButtons();
-      sendStatus('reauth-required', '액세스 토큰이 만료되었습니다. 이 인증 페이지의 Google 연결 버튼을 눌러 다시 인증하세요.');
+      sendStatus('reauth-required', '액세스 토큰이 만료되었습니다. 계정을 다시 연결하세요.');
       sendResponse(requestId, false, null, {
         code: 'reauth-required',
         message: 'Google 액세스 토큰이 만료되었거나 아직 연결되지 않았습니다.'
@@ -375,8 +375,8 @@
     }
     connectButton.disabled = true;
     selectButton.disabled = true;
-    setAccountStatus('Google 계정 선택 및 Drive appData 권한을 요청하고 있습니다.');
-    setStatus('Google 인증 UI를 여는 중…');
+    setAccountStatus('Google 계정 및 Drive 접근 권한을 확인하고 있습니다.');
+    setStatus('Google 인증을 시작합니다…');
 
     try {
       const client = google.accounts.oauth2.initTokenClient({
@@ -392,7 +392,7 @@
               setStatus('Google 계정 또는 권한 승인이 거부되었습니다.', true);
             } else {
               clearPageToken();
-              sendStatus('reauth-required', response && (response.error_description || response.error) || 'Google 액세스 토큰을 받지 못했습니다.');
+              sendStatus('reauth-required', response && (response.error_description || response.error) || 'Google 인증 정보를 받지 못했습니다.');
               setStatus('Google 인증에 실패했습니다.', true);
             }
             updateButtons();
@@ -406,7 +406,7 @@
           }
           if (!granted) {
             clearPageToken();
-            sendStatus('scope-missing', 'Google Drive appData 권한이 승인 scope에 포함되지 않았습니다.');
+            sendStatus('scope-missing', '필수 Google Drive 권한이 승인되지 않았습니다.');
             setStatus('Google Drive appData 권한이 부족합니다. 권한을 다시 승인하세요.', true);
             updateButtons();
             return;
@@ -424,24 +424,24 @@
           if (tokenTimer !== null) clearTimeout(tokenTimer);
           tokenTimer = setTimeout(() => {
             clearPageToken();
-            sendStatus('reauth-required', 'Google 액세스 토큰이 만료되었습니다. 이 페이지에서 다시 연결하세요.');
+            sendStatus('reauth-required', 'Google 인증이 만료되었습니다. 다시 연결하세요.');
             setDriveStatus('액세스 토큰 만료 — 재인증 필요', true);
             setStatus('Google 인증이 만료되었습니다. 연결 버튼을 눌러 갱신하세요.', true);
           }, Math.max(1000, (seconds - 15) * 1000));
           updateButtons();
-          sendStatus('connected', 'Google 계정 연결 및 Drive appData 권한 승인이 완료되었습니다.');
+          sendStatus('connected', 'Google 계정이 연결되었습니다.');
           setDriveStatus('Google Drive에 연결됨');
-          setStatus('연결되었습니다. Drive 작업은 이 페이지에서 직접 처리됩니다.');
+          setStatus('연결 완료. Drive 작업을 사용할 수 있습니다.');
         },
         error_callback: error => {
           const type = String(error && error.type || 'popup_error');
           if (type === 'popup_closed') {
             clearPageToken();
-            sendStatus('auth-cancelled', 'Google 계정 선택 창이 닫혔습니다.');
+            sendStatus('auth-cancelled', '인증 창이 닫혔습니다.');
             setStatus('Google 인증 창이 닫혔습니다.', true);
           } else if (type === 'popup_failed_to_open') {
             clearPageToken();
-            sendStatus('popup-blocked', '브라우저가 Google 인증 팝업을 차단했습니다.');
+            sendStatus('popup-blocked', '브라우저가 인증 팝업을 차단했습니다.');
             setStatus('Google 인증 팝업이 차단되었습니다. 이 페이지의 팝업을 허용하세요.', true);
           } else {
             sendStatus('reauth-required', type);
@@ -464,7 +464,7 @@
     clearTokenTimer();
     sendStatus('logged-out', '이 페이지의 메모리에서 Google 액세스 토큰을 삭제했습니다. Google 앱 권한 동의는 유지됩니다.');
     setDriveStatus('로그아웃됨');
-    setStatus('명시적 로그아웃을 완료했습니다. Google 권한 동의는 철회하지 않았습니다.');
+    setStatus('로그아웃 완료. Google 앱 권한은 유지됩니다.');
     updateButtons();
   }
 
@@ -474,8 +474,8 @@
       confirmBox.disabled = true;
       ready = true;
       sendToGame('wayward-cloudsave-ready', { sessionId });
-      setStatus('게임과 보안 세션이 연결되었습니다. Google 계정 연결을 진행하세요.');
-      setAccountStatus('Google 인증을 시작할 준비가 되었습니다.');
+      setStatus('게임 연결 완료. Google 계정을 연결하세요.');
+      setAccountStatus('인증 준비 완료');
     } else if (!userConfirmed) {
       ready = false;
       clearPageToken();
@@ -487,12 +487,12 @@
   function waitForGIS(deadline) {
     if (window.google && google.accounts && google.accounts.oauth2 &&
         typeof google.accounts.oauth2.initTokenClient === 'function') {
-      setStatus(ready ? 'Google 인증을 시작할 준비가 되었습니다.' : 'Wayward 팝업 연결 및 사용자 확인을 기다리고 있습니다.');
+      setStatus(ready ? '인증 준비 완료' : '게임 연결 확인을 기다리고 있습니다.');
       updateButtons();
       return;
     }
     if (Date.now() >= deadline) {
-      setStatus('Google Identity 라이브러리를 불러오지 못했습니다. 네트워크 또는 CSP 설정을 확인하세요.', true);
+      setStatus('Google 인증 서비스를 불러오지 못했습니다. 네트워크 연결을 확인하세요.', true);
       connectButton.disabled = true;
       selectButton.disabled = true;
       return;
@@ -501,12 +501,12 @@
   }
 
   if (!nonceValid || !originValid || !/^[^@\s]+\.apps\.googleusercontent\.com$/.test(clientId)) {
-    failClosed('잘못된 인증 요청입니다. 게임에서 Google 연결을 다시 시작하세요.');
+    failClosed('유효하지 않은 인증 요청입니다. 게임에서 다시 연결하세요.');
     return;
   }
 
   if (!openerAlive()) {
-    failClosed('원래 Wayward 게임 창을 찾지 못했습니다. 게임에서 인증 팝업을 다시 여세요.');
+    failClosed('Wayward 게임 창을 찾을 수 없습니다. 게임에서 다시 연결하세요.');
     return;
   }
 
@@ -531,11 +531,11 @@
     clearTokenTimer();
     updateButtons();
     if (result && result.successful === true) {
-      sendStatus('permission-revoked', 'Google에서 앱 권한 철회를 확인했습니다.');
+      sendStatus('permission-revoked', 'Google 앱 권한이 해제되었습니다.');
       setDriveStatus('Google 앱 권한이 철회되었습니다.');
       setStatus('Google 앱 권한 철회를 완료했습니다.');
     } else {
-      sendStatus('revoke-failed', 'Google 권한 철회 성공 응답을 받지 못했습니다.');
+      sendStatus('revoke-failed', 'Google에서 권한 해제를 확인하지 못했습니다.');
       setDriveStatus('권한 철회가 확인되지 않았습니다.', true);
       setStatus('Google 앱 권한 철회에 실패했거나 결과가 확인되지 않았습니다.', true);
     }
