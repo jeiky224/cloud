@@ -540,7 +540,12 @@
   });
 
   window.addEventListener('message', onParentMessage);
-  window.addEventListener('pagehide', clearPageToken);
+  window.addEventListener('pagehide', () => {
+    if (ready && openerSeen && userConfirmed && openerAlive()) {
+      sendStatus('reauth-required', '인증 페이지가 새로고침되거나 닫혀 세션을 종료했습니다.');
+    }
+    clearPageToken();
+  });
 
   // Announce readiness only after the exact HTTPS page has installed its
   // receiver. The opener validates this source WindowProxy, origin and nonce.
