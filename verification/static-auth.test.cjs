@@ -74,6 +74,7 @@ function runPage({ gameOrigin, nonce, opener = true, mode = 'login', stateOverri
       '&mode=' + encodeURIComponent(mode)
   };
   const window = {
+    WAYWARD_GOOGLE_CLIENT_ID: CLIENT_ID,
     location, opener: parent, google: gis,
     addEventListener(type, callback) { listeners[type] = callback; },
     close() {}
