@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="referrer" content="no-referrer">
+  <meta name="color-scheme" content="dark light">
+  <title>Wayward CloudSave · 인증 복구</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color-scheme:dark light;background:#111827;color:#f3f4f6}
+    body{margin:0;min-height:100svh;display:grid;place-items:center;padding:20px}
+    main{width:min(100%,520px);padding:24px;border:1px solid #374151;border-radius:16px;background:#1f2937}
+    h1{font-size:1.3rem}p,li{line-height:1.55;color:#d1d5db}
+    a{color:#93c5fd}code{overflow-wrap:anywhere}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>CloudSave 인증 결과 복구</h1>
+    <p>팝업 연결이 끊기거나 Android WebView가 외부 브라우저를 열면 인증 페이지가 토큰을 게임 창으로 자동 전달하지 못할 수 있습니다. 이 경우에도 인증은 중단할 필요가 없습니다.</p>
+    <ol>
+      <li>Wayward 게임과 CloudSave 창을 닫지 않은 상태로 둡니다.</li>
+      <li>Google 인증 페이지에서 표시되는 일회성 JSON 응답을 직접 복사합니다.</li>
+      <li>원래 게임으로 돌아가 CloudSave의 인증 응답 입력란에 붙여 넣고 적용합니다.</li>
+      <li>nonce가 일치하지 않거나 요청 시간이 오래 지났다면 게임에서 Google 연결을 새로 시작합니다.</li>
+    </ol>
+    <p>응답에는 짧은 수명의 Google 액세스 토큰이 포함됩니다. 채팅, 이메일, 공개 게시물에 붙여 넣지 마세요. 토큰을 URL에 넣거나 사이트 저장소·서버에 저장하지 않습니다.</p>
+    <p><a href="./auth.html">Google 인증 페이지로 돌아가기</a></p>
+    <p><a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener noreferrer">Google 계정 권한 관리</a></p>
+  </main>
+</body>
+</html>
