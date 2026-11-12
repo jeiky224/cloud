@@ -3,7 +3,7 @@ name: Deploy CloudSave static authentication pages
 on:
   push:
     branches:
-      - restart/cloudsave-static-google-direct-20261113
+      - work/cloudsave-pages-drive-owner-20261113
     paths:
       - 'site/**'
       - '.github/workflows/deploy-pages.yml'
