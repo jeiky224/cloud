@@ -5,28 +5,27 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark light">
-  <title>Wayward CloudSave · 인증 복구</title>
+  <title>Wayward CloudSave · 연결 복구</title>
   <style>
     :root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color-scheme:dark light;background:#111827;color:#f3f4f6}
     body{margin:0;min-height:100svh;display:grid;place-items:center;padding:20px}
-    main{width:min(100%,520px);padding:24px;border:1px solid #374151;border-radius:16px;background:#1f2937}
-    h1{font-size:1.3rem}p,li{line-height:1.55;color:#d1d5db}
-    a{color:#93c5fd}code{overflow-wrap:anywhere}
+    main{width:min(100%,540px);padding:24px;border:1px solid #374151;border-radius:16px;background:#1f2937}
+    h1{font-size:1.3rem}p,li{line-height:1.55;color:#d1d5db}a{color:#93c5fd}
   </style>
 </head>
 <body>
   <main>
-    <h1>CloudSave 인증 결과 복구</h1>
-    <p>팝업 연결이 끊기거나 Android WebView가 외부 브라우저를 열면 인증 페이지가 토큰을 게임 창으로 자동 전달하지 못할 수 있습니다. 이 경우에도 인증은 중단할 필요가 없습니다.</p>
+    <h1>CloudSave 팝업 연결 복구</h1>
+    <p>이 페이지는 Google 액세스 토큰과 Drive API 요청을 이 HTTPS 창 안에서만 처리합니다. 보안상 토큰을 게임 파일로 복사하거나 URL에 붙여 넣는 수동 복구 방식은 제공하지 않습니다.</p>
     <ol>
-      <li>Wayward 게임과 CloudSave 창을 닫지 않은 상태로 둡니다.</li>
-      <li>Google 인증 페이지에서 표시되는 일회성 JSON 응답을 직접 복사합니다.</li>
-      <li>원래 게임으로 돌아가 CloudSave의 인증 응답 입력란에 붙여 넣고 적용합니다.</li>
-      <li>nonce가 일치하지 않거나 요청 시간이 오래 지났다면 게임에서 Google 연결을 새로 시작합니다.</li>
+      <li>Wayward 게임 창을 닫지 말고 같은 브라우저에서 인증 팝업을 여세요.</li>
+      <li>팝업이 차단되면 해당 브라우저에서 팝업을 허용한 뒤 게임의 Google 연결 버튼을 다시 누르세요.</li>
+      <li>외부 브라우저로 분리되어 원래 게임 창과 통신할 수 없으면 그 인증 창은 작업을 중단합니다. 게임에서 새 연결 요청을 시작하세요.</li>
+      <li>인증 페이지의 연결 확인란을 체크한 뒤 Google 계정 연결 버튼을 누르세요.</li>
     </ol>
-    <p>응답에는 짧은 수명의 Google 액세스 토큰이 포함됩니다. 채팅, 이메일, 공개 게시물에 붙여 넣지 마세요. 토큰을 URL에 넣거나 사이트 저장소·서버에 저장하지 않습니다.</p>
-    <p><a href="./auth.html">Google 인증 페이지로 돌아가기</a></p>
-    <p><a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener noreferrer">Google 계정 권한 관리</a></p>
+    <p>Google 인증과 Drive 요청은 Google에 직접 전송됩니다. 인증 서버, Worker, 프록시 또는 DB는 없습니다.</p>
+    <p><a href="./auth.html">인증 페이지 열기</a></p>
+    <p><a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener noreferrer">Google 계정 앱 권한 관리</a></p>
   </main>
 </body>
 </html>
