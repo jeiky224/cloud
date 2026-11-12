@@ -6,6 +6,8 @@
   const gameOrigin = params.get('origin') || '';
   const nonce = params.get('nonce') || '';
   const loginPolicy = params.get('login') === 'select_account' ? 'select_account' : 'remember';
+  const nativeTransportRequested = params.get('transport') === 'custom-tabs';
+  const AUTH_ORIGIN = 'https://jeiky224.github.io';
   const clientId = String(window.WAYWARD_GOOGLE_CLIENT_ID || '').trim();
   const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
   const PROTOCOL_VERSION = 1;
@@ -35,6 +37,12 @@
   let connected = false;
   let requestCount = 0;
   const seenRequestIds = new Set();
+  let nativePort = null;
+  let nativeTransportClosed = false;
+  const nativeTransfers = new Map();
+  const MAX_NATIVE_MESSAGE_BYTES = 12 * 1024 * 1024;
+  const NATIVE_CHUNK_CHARS = 24 * 1024;
+  const MAX_NATIVE_CHUNKS = 768;
 
   function setStatus(message, error) {
     statusNode.textContent = String(message || '');
@@ -74,12 +82,98 @@
   const originValid = originKind !== 'invalid';
 
   function openerAlive() {
+    if (nativeTransportRequested) return !!nativePort && !nativeTransportClosed;
     try { return !!window.opener && !window.opener.closed; }
     catch (_) { return false; }
   }
 
   function targetGameOrigin() {
     return fileMode ? '*' : gameOrigin;
+  }
+
+  function encodeUtf8Base64(value) {
+    const bytes = new TextEncoder().encode(value);
+    let binary = '';
+    for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + 0x8000, bytes.length)));
+    }
+    return { bytes, encoded: btoa(binary) };
+  }
+
+  function decodeUtf8Base64(value) {
+    if (typeof value !== 'string' || value.length > Math.ceil(MAX_NATIVE_MESSAGE_BYTES * 4 / 3) + 8) return null;
+    let binary;
+    try { binary = atob(value); } catch (_) { return null; }
+    if (binary.length > MAX_NATIVE_MESSAGE_BYTES) return null;
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
+    catch (_) { return null; }
+  }
+
+  function sendNativePayload(payload) {
+    if (!nativePort || nativeTransportClosed) return false;
+    let raw;
+    try { raw = JSON.stringify(payload); } catch (_) { return false; }
+    let encoded;
+    try { encoded = encodeUtf8Base64(raw); } catch (_) { return false; }
+    if (encoded.bytes.length > MAX_NATIVE_MESSAGE_BYTES) return false;
+    try {
+      if (encoded.bytes.length <= NATIVE_CHUNK_CHARS) {
+        nativePort.postMessage(raw);
+        return true;
+      }
+      const id = makeNonce();
+      const total = Math.ceil(encoded.encoded.length / NATIVE_CHUNK_CHARS);
+      if (total > MAX_NATIVE_CHUNKS) return false;
+      for (let seq = 0; seq < total; seq++) {
+        nativePort.postMessage(JSON.stringify({
+          __waywardCctChunk: 1, id, seq, total,
+          data: encoded.encoded.slice(seq * NATIVE_CHUNK_CHARS, (seq + 1) * NATIVE_CHUNK_CHARS)
+        }));
+      }
+      return true;
+    } catch (_) { return false; }
+  }
+
+  function receiveNativePayload(raw) {
+    if (typeof raw !== 'string' || raw.length > NATIVE_CHUNK_CHARS + 512) return null;
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch (_) { return null; }
+    if (!parsed || parsed.__waywardCctChunk !== 1) return parsed;
+    if (typeof parsed.id !== 'string' || !/^[a-f0-9]{48}$/.test(parsed.id) ||
+        !Number.isSafeInteger(parsed.seq) || !Number.isSafeInteger(parsed.total) ||
+        parsed.total < 2 || parsed.total > MAX_NATIVE_CHUNKS || parsed.seq < 0 ||
+        parsed.seq >= parsed.total || typeof parsed.data !== 'string' ||
+        parsed.data.length > NATIVE_CHUNK_CHARS) return null;
+    const now = Date.now();
+    for (const [key, value] of nativeTransfers) {
+      if (now - value.createdAt > 60000) nativeTransfers.delete(key);
+    }
+    let transfer = nativeTransfers.get(parsed.id);
+    if (!transfer) {
+      if (nativeTransfers.size >= 4) nativeTransfers.delete(nativeTransfers.keys().next().value);
+      transfer = { total: parsed.total, chunks: new Array(parsed.total), chars: 0, received: 0, createdAt: now };
+      nativeTransfers.set(parsed.id, transfer);
+    }
+    if (transfer.total !== parsed.total) { nativeTransfers.delete(parsed.id); return null; }
+    if (transfer.chunks[parsed.seq] === undefined) {
+      transfer.chunks[parsed.seq] = parsed.data;
+      transfer.chars += parsed.data.length;
+      transfer.received += 1;
+    } else if (transfer.chunks[parsed.seq] !== parsed.data) {
+      nativeTransfers.delete(parsed.id);
+      return null;
+    }
+    if (transfer.chars > Math.ceil(MAX_NATIVE_MESSAGE_BYTES * 4 / 3) + 8) {
+      nativeTransfers.delete(parsed.id);
+      return null;
+    }
+    if (transfer.received !== transfer.total) return null;
+    nativeTransfers.delete(parsed.id);
+    const complete = decodeUtf8Base64(transfer.chunks.join(''));
+    if (complete == null) return null;
+    try { return JSON.parse(complete); } catch (_) { return null; }
   }
 
   function baseMessage(type, extra) {
@@ -91,9 +185,10 @@
   }
 
   function sendToGame(type, extra) {
-    if (!openerSeen || !openerAlive() || !nonceValid || !originValid) return false;
+    if ((!openerSeen && type !== 'wayward-cloudsave-page-ready') || !openerAlive() || !nonceValid || !originValid) return false;
     const payload = baseMessage(type, extra);
     if (sessionId) payload.sessionId = sessionId;
+    if (nativeTransportRequested) return sendNativePayload(payload);
     try {
       window.opener.postMessage(payload, targetGameOrigin());
       return true;
@@ -155,13 +250,10 @@
     setDriveStatus('Drive 접근이 차단되었습니다.', true);
   }
 
-  function validParentMessage(event, data) {
-    return openerAlive() &&
-      event.source === window.opener &&
-      event.origin === expectedEventOrigin &&
-      data && typeof data === 'object' &&
-      data.version === PROTOCOL_VERSION &&
-      data.nonce === nonce;
+  function validParentMessage(event, data, fromNative) {
+    if (!data || typeof data !== 'object' || data.version !== PROTOCOL_VERSION || data.nonce !== nonce) return false;
+    if (fromNative) return nativeTransportRequested && !!nativePort && !nativeTransportClosed;
+    return openerAlive() && event && event.source === window.opener && event.origin === expectedEventOrigin;
   }
 
   function exactKeys(value, allowed, required) {
@@ -325,19 +417,31 @@
     }
   }
 
-  function onParentMessage(event) {
-    const data = event.data;
-    if (!validParentMessage(event, data)) return;
+  function handleParentData(data, event, fromNative) {
+    if (!validParentMessage(event, data, fromNative)) return;
+
+    if (data.type === 'wayward-cloudsave-native-close') {
+      nativeTransportClosed = true;
+      clearPageToken();
+      failClosed('Wayward 게임 세션이 종료되어 인증 연결과 메모리 토큰을 정리했습니다.');
+      try { if (nativePort) nativePort.close(); } catch (_) {}
+      nativePort = null;
+      return;
+    }
 
     if (data.type === 'wayward-cloudsave-hello') {
       if (openerSeen || !/^[a-f0-9]{48}$/.test(nonce)) return;
       openerSeen = true;
       try { sessionId = makeNonce(); }
       catch (_) { failClosed('이 브라우저에서 암호학적 난수를 생성하지 못했습니다.'); return; }
-      originTitle.textContent = 'Wayward 게임 팝업의 핸드셰이크 확인됨';
-      originDetail.textContent = fileMode
-        ? '게임 Origin은 opaque origin(null)이며, 실제 opener 창과 일회성 nonce가 확인되었습니다.'
-        : '실제 opener 창, 지정된 게임 Origin, 일회성 nonce가 확인되었습니다.';
+      originTitle.textContent = nativeTransportRequested
+        ? 'Wayward 런처 보안 메시지 연결 확인됨'
+        : 'Wayward 게임 팝업의 핸드셰이크 확인됨';
+      originDetail.textContent = nativeTransportRequested
+        ? 'Digital Asset Links로 검증된 Custom Tabs 메시지 채널과 게임 세션 nonce를 확인했습니다.'
+        : (fileMode
+          ? '게임 Origin은 opaque origin(null)이며, 실제 opener 창과 일회성 nonce가 확인되었습니다.'
+          : '실제 opener 창, 지정된 게임 Origin, 일회성 nonce가 확인되었습니다.');
       originValue.textContent = '게임 Origin: ' + gameOrigin;
       showConfirm();
       return;
@@ -357,11 +461,58 @@
         return;
       }
       if (!validateRequest(data)) return;
-      processRequest(data).catch(error => {
-        sendResponse(data.requestId, false, null, error);
-      });
+      processRequest(data).catch(error => sendResponse(data.requestId, false, null, error));
     }
   }
+
+  function initializeNativePort(event) {
+    if (!nativeTransportRequested || nativePort || nativeTransportClosed ||
+        !event || event.origin !== AUTH_ORIGIN || !event.ports || event.ports.length !== 1) return false;
+    let init = event.data;
+    if (typeof init === 'string') {
+      try { init = JSON.parse(init); } catch (_) { return false; }
+    }
+    if (!init || init.type !== 'wayward-cloudsave-cct-init' ||
+        init.version !== PROTOCOL_VERSION || init.nonce !== nonce) return false;
+    const port = event.ports[0];
+    if (!port || typeof port.postMessage !== 'function') return false;
+    nativePort = port;
+    nativePort.onmessage = messageEvent => {
+      const payload = receiveNativePayload(messageEvent && messageEvent.data);
+      if (payload) handleParentData(payload, null, true);
+    };
+    nativePort.onmessageerror = () => {
+      nativeTransportClosed = true;
+      clearPageToken();
+      failClosed('런처와의 보안 메시지 채널이 종료되었습니다. 게임에서 다시 연결하세요.');
+    };
+    try { if (typeof nativePort.start === 'function') nativePort.start(); }
+    catch (_) { failClosed('런처 메시지 채널을 시작하지 못했습니다.'); return false; }
+    originTitle.textContent = 'Wayward 런처 보안 메시지 채널 연결됨';
+    originDetail.textContent = 'Digital Asset Links로 검증된 런처 origin과 일회성 게임 nonce를 확인했습니다.';
+    originValue.textContent = '게임 Origin: ' + gameOrigin;
+    if (!sendToGame('wayward-cloudsave-page-ready')) {
+      failClosed('Wayward 런처에 인증 페이지 준비 상태를 전달하지 못했습니다.');
+      return false;
+    }
+    return true;
+  }
+
+  function onParentMessage(event) {
+    if (nativeTransportRequested && event && event.origin === AUTH_ORIGIN) {
+      if (event.ports && event.ports.length) {
+        initializeNativePort(event);
+        return;
+      }
+      const payload = receiveNativePayload(event.data);
+      if (payload) handleParentData(payload, null, true);
+      return;
+    }
+    if (nativeTransportRequested) return;
+    handleParentData(event && event.data, event, false);
+  }
+
+  window.addEventListener('message', onParentMessage);
 
   function beginConnection(forceSelectAccount) {
     if (!ready || !openerSeen || !userConfirmed || !openerAlive()) {
@@ -505,7 +656,7 @@
     return;
   }
 
-  if (!openerAlive()) {
+  if (!nativeTransportRequested && !openerAlive()) {
     failClosed('Wayward 게임 창을 찾을 수 없습니다. 게임에서 다시 연결하세요.');
     return;
   }
@@ -549,24 +700,33 @@
     clearPageToken();
   });
 
-  // Announce readiness only after the exact HTTPS page has installed its
-  // receiver. The opener validates this source WindowProxy, origin and nonce.
-  try {
-    window.opener.postMessage(baseMessage('wayward-cloudsave-page-ready'), targetGameOrigin());
-  } catch (_) {
-    failClosed('Wayward 게임 창에 연결 준비 메시지를 보내지 못했습니다.');
-    return;
-  }
-
-  popupWatchTimer = setInterval(() => {
-    if (!openerAlive()) {
-      clearTokenTimer();
-      clearPageToken();
-      if (popupWatchTimer !== null) clearInterval(popupWatchTimer);
-      popupWatchTimer = null;
-      failClosed('Wayward 게임 창이 닫혀 연결을 종료했습니다. 토큰은 메모리에서 삭제했습니다.');
+  // Native Custom Tabs initializes the channel with a MessagePort-bearing message.
+  // Ordinary browsers keep the original real-window.opener protocol.
+  if (nativeTransportRequested) {
+    setStatus('런처의 보안 메시지 채널을 기다리고 있습니다.');
+    setTimeout(() => {
+      if (!nativePort && !nativeTransportClosed) {
+        failClosed('런처의 Custom Tabs 메시지 채널을 확인하지 못했습니다. 앱과 웹 연결 설정을 확인하세요.');
+      }
+    }, 20000);
+  } else {
+    try {
+      window.opener.postMessage(baseMessage('wayward-cloudsave-page-ready'), targetGameOrigin());
+    } catch (_) {
+      failClosed('Wayward 게임 창에 연결 준비 메시지를 보내지 못했습니다.');
+      return;
     }
-  }, 1000);
+
+    popupWatchTimer = setInterval(() => {
+      if (!openerAlive()) {
+        clearTokenTimer();
+        clearPageToken();
+        if (popupWatchTimer !== null) clearInterval(popupWatchTimer);
+        popupWatchTimer = null;
+        failClosed('Wayward 게임 창이 닫혀 연결을 종료했습니다. 토큰은 메모리에서 삭제했습니다.');
+      }
+    }, 1000);
+  }
 
   waitForGIS(Date.now() + 20000);
 })();
