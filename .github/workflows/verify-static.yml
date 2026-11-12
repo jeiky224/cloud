@@ -36,3 +36,15 @@ jobs:
         run: |
           ! grep -RniE 'vercel\.app|workers\.dev|cloudflare|render\.com|client_secret|refresh_token|token_endpoint' site
           ! grep -RniE 'fetch\([^\n]*(vercel|workers|cloudflare|render)' site
+      - name: Export static page source for isolated browser runtime checks
+        run: |
+          mkdir -p test-artifact
+          cp -R site test-artifact/
+          cp verification/static-auth.test.cjs test-artifact/
+          cd test-artifact
+          zip -qr ../cloudsave-static-auth-runtime.zip .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cloudsave-static-auth-runtime
+          path: cloudsave-static-auth-runtime.zip
+          if-no-files-found: error
