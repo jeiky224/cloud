@@ -86,7 +86,8 @@ function runAuthPage({
   opener = true,
   scope = DRIVE_SCOPE,
   revokeSuccessful = true,
-  responseError = ''
+  responseError = '',
+  nativeTransport = false
 } = {}) {
   const ids = [
     'connect','select-account','logout','revoke','status','account-status','drive-status',
@@ -94,11 +95,21 @@ function runAuthPage({
   ];
   const elements = Object.fromEntries(ids.map(id => [id, element(id)]));
   const parentMessages = [];
-  const parent = opener ? {
+  const parent = opener && !nativeTransport ? {
     closed: false,
     postMessage(data, targetOrigin) { parentMessages.push({ data, targetOrigin }); }
   } : null;
   const eventListeners = Object.create(null);
+  const nativeMessages = [];
+  const nativePort = nativeTransport ? {
+    onmessage: null,
+    onmessageerror: null,
+    started: false,
+    closed: false,
+    postMessage(data) { nativeMessages.push(String(data)); },
+    start() { this.started = true; },
+    close() { this.closed = true; }
+  } : null;
   const drive = makeDriveService();
   const gisCalls = [];
   const gis = {
@@ -132,7 +143,8 @@ function runAuthPage({
     }
   };
   const search = '?origin=' + encodeURIComponent(gameOrigin) +
-    '&nonce=' + encodeURIComponent(NONCE);
+    '&nonce=' + encodeURIComponent(NONCE) +
+    (nativeTransport ? '&transport=custom-tabs' : '');
   const location = { origin: PAGES_ORIGIN, search };
   const window = {
     location,
@@ -149,7 +161,8 @@ function runAuthPage({
   const timers = [];
   vm.runInNewContext(authSource, {
     window, document, location, google: gis, crypto: webcrypto,
-    URL, URLSearchParams, Uint8Array, Date, String, Number, Math, RegExp,
+    URL, URLSearchParams, Uint8Array, TextEncoder, TextDecoder,
+    btoa, atob, Date, String, Number, Math, RegExp,
     setTimeout(callback, ms) { timers.push({ callback, ms }); return timers.length; },
     clearTimeout() {},
     setInterval(callback, ms) { timers.push({ callback, ms, interval: true }); return timers.length; },
@@ -164,10 +177,39 @@ function runAuthPage({
     elements.confirm.checked = true;
     elements.confirm.listeners.change();
   }
+  function initNative() {
+    if (!nativeTransport || !nativePort) throw new Error('native transport is not enabled');
+    eventListeners.message({
+      data: { type: 'wayward-cloudsave-cct-init', version: 1, nonce: NONCE },
+      origin: PAGES_ORIGIN,
+      ports: [nativePort]
+    });
+  }
+  function sendNative(data) {
+    if (!nativePort || typeof nativePort.onmessage !== 'function') {
+      throw new Error('native MessagePort is not initialized');
+    }
+    nativePort.onmessage({
+      data: typeof data === 'string' ? data : JSON.stringify(data)
+    });
+  }
+  function nativeHandshake(helloExtra = {}) {
+    initNative();
+    sendNative(Object.assign({
+      type: 'wayward-cloudsave-hello', version: 1, nonce: NONCE
+    }, helloExtra));
+    elements.confirm.checked = true;
+    elements.confirm.listeners.change();
+  }
+  const outbound = () => nativeTransport ? nativeMessages.map(raw => {
+    try { return JSON.parse(raw); } catch (_) { return null; }
+  }) : parentMessages.map(x => x.data);
   return {
     elements, parentMessages, parent, eventListeners, drive, gisCalls, timers,
-    sendParent, handshake, sessionId: () => parentMessages.find(x =>
-      x.data && x.data.type === 'wayward-cloudsave-ready')?.data.sessionId
+    nativeMessages, nativePort, sendParent, sendNative, initNative, nativeHandshake,
+    handshake,
+    sessionId: () => outbound().find(x =>
+      x && x.type === 'wayward-cloudsave-ready')?.sessionId
   };
 }
 
@@ -186,6 +228,65 @@ function requestData(sessionId, requestId, action, payload = {}) {
 async function tick() {
   await new Promise(resolve => setImmediate(resolve));
 }
+
+
+test('Custom Tabs MessagePort handshake, chunked game request, and token isolation', async () => {
+  const page = runAuthPage({
+    gameOrigin: 'http://127.0.0.1:8080',
+    opener: false,
+    nativeTransport: true
+  });
+
+  page.initNative();
+  assert.equal(page.nativePort.started, true);
+  const initial = JSON.parse(page.nativeMessages[0]);
+  assert.equal(initial.type, 'wayward-cloudsave-page-ready');
+  assert.equal(initial.nonce, NONCE);
+
+  // The CCT app-to-page channel uses a transferred MessagePort. Exercise the
+  // same bounded Base64 chunk envelope used by the Java Custom Tabs bridge.
+  const hello = JSON.stringify({
+    type: 'wayward-cloudsave-hello',
+    version: 1,
+    nonce: NONCE,
+    padding: 'x'.repeat(90000)
+  });
+  const encoded = Buffer.from(hello, 'utf8').toString('base64');
+  const chunkSize = 24 * 1024;
+  const total = Math.ceil(encoded.length / chunkSize);
+  const transferId = 'abcdef0123456789abcdef0123456789abcdef0123456789';
+  for (let seq = 0; seq < total; seq++) {
+    page.sendNative({
+      __waywardCctChunk: 1,
+      id: transferId,
+      seq,
+      total,
+      data: encoded.slice(seq * chunkSize, (seq + 1) * chunkSize)
+    });
+  }
+
+  page.elements.confirm.checked = true;
+  page.elements.confirm.listeners.change();
+  const sessionId = page.sessionId();
+  assert.match(sessionId, SESSION_ID);
+  assert.equal(page.nativeMessages.some(raw =>
+    JSON.parse(raw).type === 'wayward-cloudsave-ready'), true);
+
+  page.elements.connect.listeners.click();
+  assert.equal(page.drive.tokenForTestOnly, TOKEN);
+  assert.ok(!page.nativeMessages.join('').includes(TOKEN),
+    'access token must never cross the Custom Tabs message channel');
+
+  const requestId = 'abcdef0123456789abcdef0123456789abcdef0123456789';
+  page.sendNative(requestData(sessionId, requestId, 'list'));
+  await tick();
+  const response = JSON.parse(page.nativeMessages.at(-1));
+  assert.equal(response.type, 'wayward-cloudsave-response');
+  assert.equal(response.requestId, requestId);
+  assert.equal(response.ok, true);
+  assert.equal(response.data.files[0].name, 'wayward-cloud-slot-1.json');
+  assert.ok(!page.nativeMessages.join('').includes(TOKEN));
+});
 
 test('file:// handshake uses wildcard only toward the opaque game origin; token never enters messages', async () => {
   const page = runAuthPage({ gameOrigin: 'null' });
