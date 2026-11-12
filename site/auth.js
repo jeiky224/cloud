@@ -202,6 +202,10 @@
               'Google 액세스 토큰을 받지 못했습니다.', response && response.error);
             return;
           }
+          if (response.state !== nonce) {
+            sendError('Google 인증 응답 state가 현재 요청과 일치하지 않습니다.', 'state_mismatch');
+            return;
+          }
           if (!hasDriveScope(response)) {
             sendError('Google Drive 앱 데이터(appDataFolder) 권한이 승인되지 않았습니다.', 'scope_missing');
             return;
