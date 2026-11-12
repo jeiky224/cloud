@@ -3,7 +3,7 @@ name: Verify CloudSave static authentication pages
 on:
   push:
     branches:
-      - restart/cloudsave-static-google-direct-20261113
+      - work/cloudsave-pages-drive-owner-20261113
     paths:
       - 'site/**'
       - 'verification/**'
@@ -29,8 +29,9 @@ jobs:
       - name: Syntax checks
         run: |
           node --check site/auth.js
+          node --check site/drive.js
           node --check site/config.js
-      - name: Static OAuth handoff tests
+      - name: Token-isolated auth and Drive bridge tests
         run: node --test verification/static-auth.test.cjs
       - name: Reject custom service dependencies and secrets
         run: |
