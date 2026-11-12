@@ -261,8 +261,9 @@
     setTimeout(() => waitForGIS(deadline), 80);
   }
 
-  // The game sends hello only after opening this exact static page. This proves
-  // the popup source and binds the reply to the nonce in the open request.
+  // The static page announces readiness only after its document and listener
+  // exist. The game validates this message's exact popup source, Pages origin,
+  // and nonce before sending the hello handshake back.
   window.addEventListener('message', onParentMessage);
 
   if (!nonceValid || !originValid) {
@@ -348,6 +349,17 @@
     payloadBox.select();
     status('전체 응답을 선택했습니다. 길게 눌러 복사하세요.');
   });
+
+  // Do not race the about:blank popup. Announce page readiness from this
+  // HTTPS document; the opener must validate origin/source/nonce and reply.
+  if (hasOpener() && nonceValid && originValid) {
+    try {
+      window.opener.postMessage({
+        type: 'wayward-cloud-auth-page-ready',
+        nonce
+      }, fileMode ? '*' : gameOrigin);
+    } catch (_) {}
+  }
 
   waitForGIS(Date.now() + 15000);
 })();
