@@ -19,3 +19,8 @@ button:disabled{opacity:.5;cursor:not-allowed}
 button.secondary{background:#475569}
 .footnote{font-size:.82rem;color:#9ca3af;margin:12px 0 0}
 a{color:#93c5fd}
+
+.small{font-size:.82rem;color:#9ca3af;overflow-wrap:anywhere}
+button.danger{background:#991b1b;color:#fff}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+.actions button{flex:1 1 140px}
