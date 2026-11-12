@@ -85,7 +85,8 @@ function runAuthPage({
   gameOrigin = 'null',
   opener = true,
   scope = DRIVE_SCOPE,
-  revokeSuccessful = true
+  revokeSuccessful = true,
+  responseError = ''
 } = {}) {
   const ids = [
     'connect','select-account','logout','revoke','status','account-status','drive-status',
@@ -110,12 +111,16 @@ function runAuthPage({
           return {
             requestAccessToken(request) {
               gisCalls.push({ request, scope: options.scope });
-              options.callback({
-                access_token: TOKEN,
-                expires_in: 3600,
-                scope,
-                error: ''
-              });
+              if (responseError) {
+                options.callback({ error: responseError, error_description: responseError });
+              } else {
+                options.callback({
+                  access_token: TOKEN,
+                  expires_in: 3600,
+                  scope,
+                  error: ''
+                });
+              }
             }
           };
         },
@@ -225,13 +230,23 @@ test('an HTTP 0.0.0.0 origin is returned to exactly that origin, not null or loc
   assert.equal(page.parentMessages[1].data.type, 'wayward-cloudsave-ready');
 });
 
+test('localhost and 127.0.0.1 origins are not normalized to one another', () => {
+  for (const origin of ['http://localhost:8080', 'http://127.0.0.1:8080']) {
+    const page = runAuthPage({ gameOrigin: origin });
+    assert.equal(page.parentMessages[0].targetOrigin, origin);
+    page.handshake();
+    assert.equal(page.parentMessages[1].targetOrigin, origin);
+  }
+});
+
 test('wrong opener, wrong origin and wrong nonce cannot establish the bridge', () => {
-  const page = runAuthPage({ gameOrigin: 'file-origin-placeholder' });
+  const page = runAuthPage({ gameOrigin: 'null' });
   const nonceWrong = 'ffffffffffffffffffffffffffffffffffffffffffffffff';
   page.sendParent({ type: 'wayward-cloudsave-hello', version: 1, nonce: nonceWrong });
   page.sendParent({ type: 'wayward-cloudsave-hello', version: 1, nonce: NONCE }, 'https://evil.example');
   page.sendParent({ type: 'wayward-cloudsave-hello', version: 1, nonce: NONCE }, 'null', { closed: false, postMessage() {} });
   assert.equal(page.parentMessages.filter(x => x.data.type === 'wayward-cloudsave-ready').length, 0);
+  assert.equal(page.drive.calls.filter(x => x.kind === 'set-token').length, 0);
   assert.equal(page.drive.calls.filter(x => x.kind === 'set-token').length, 0);
 });
 
@@ -250,11 +265,11 @@ test('scope missing and consent denied remain distinct states and never set a to
   assert.ok(scopePage.parentMessages.some(x => x.data.status === 'scope-missing'));
   assert.equal(scopePage.drive.calls.filter(x => x.kind === 'set-token').length, 0);
 
-  const denied = runAuthPage({ gameOrigin: 'null' });
+  const denied = runAuthPage({ gameOrigin: 'null', responseError: 'access_denied' });
   denied.handshake();
-  // Replace the mock callback through a fresh GIS token client response override.
   denied.elements.connect.listeners.click();
-  assert.equal(denied.drive.tokenForTestOnly, TOKEN);
+  assert.ok(denied.parentMessages.some(x => x.data.status === 'consent-denied'));
+  assert.equal(denied.drive.calls.filter(x => x.kind === 'set-token').length, 0);
 });
 
 test('explicit logout clears only in-memory token; revoke succeeds only on a positive GIS result', async () => {
