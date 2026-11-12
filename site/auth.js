@@ -8,9 +8,8 @@
   const loginPolicy = params.get('login') === 'select_account' ? 'select_account' : 'remember';
   const clientId = String(window.WAYWARD_GOOGLE_CLIENT_ID || '').trim();
   const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
-  const PAGES_ORIGIN = 'https://jeiky224.github.io';
   const PROTOCOL_VERSION = 1;
-  const MAX_REQUESTS = 2048;
+  const MAX_REQUESTS = 65536;
   const MAX_PAYLOAD_CHARS = 12 * 1024 * 1024;
 
   const connectButton = $('connect');
@@ -259,6 +258,7 @@
         result = { successful: false, error: String(error && error.message || error) };
       }
       connected = false;
+      clearTokenTimer();
       updateButtons();
       if (result && result.successful === true) {
         sendStatus('permission-revoked', 'Google에서 앱 권한 철회를 확인했습니다.');
@@ -385,9 +385,11 @@
           if (!response || response.error || !response.access_token) {
             const code = String(response && response.error || 'token-error');
             if (code === 'access_denied') {
+              clearPageToken();
               sendStatus('consent-denied', 'Google 계정 또는 Drive 권한 승인이 거부되었습니다.');
               setStatus('Google 계정 또는 권한 승인이 거부되었습니다.', true);
             } else {
+              clearPageToken();
               sendStatus('reauth-required', response && (response.error_description || response.error) || 'Google 액세스 토큰을 받지 못했습니다.');
               setStatus('Google 인증에 실패했습니다.', true);
             }
@@ -401,6 +403,7 @@
             granted = String(response.scope || '').split(/\s+/).includes(DRIVE_SCOPE);
           }
           if (!granted) {
+            clearPageToken();
             sendStatus('scope-missing', 'Google Drive appData 권한이 승인 scope에 포함되지 않았습니다.');
             setStatus('Google Drive appData 권한이 부족합니다. 권한을 다시 승인하세요.', true);
             updateButtons();
@@ -431,9 +434,11 @@
         error_callback: error => {
           const type = String(error && error.type || 'popup_error');
           if (type === 'popup_closed') {
+            clearPageToken();
             sendStatus('auth-cancelled', 'Google 계정 선택 창이 닫혔습니다.');
             setStatus('Google 인증 창이 닫혔습니다.', true);
           } else if (type === 'popup_failed_to_open') {
+            clearPageToken();
             sendStatus('popup-blocked', '브라우저가 Google 인증 팝업을 차단했습니다.');
             setStatus('Google 인증 팝업이 차단되었습니다. 이 페이지의 팝업을 허용하세요.', true);
           } else {
@@ -464,6 +469,7 @@
   function onConfirmChanged() {
     userConfirmed = confirmBox.checked;
     if (userConfirmed && openerSeen && !ready && openerAlive()) {
+      confirmBox.disabled = true;
       ready = true;
       sendToGame('wayward-cloudsave-ready', { sessionId });
       setStatus('게임과 보안 세션이 연결되었습니다. Google 계정 연결을 진행하세요.');
@@ -520,6 +526,7 @@
       result = { successful: false };
     }
     connected = false;
+    clearTokenTimer();
     updateButtons();
     if (result && result.successful === true) {
       sendStatus('permission-revoked', 'Google에서 앱 권한 철회를 확인했습니다.');
