@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex,nofollow">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://accounts.google.com/gsi/client; connect-src https://accounts.google.com/gsi/ https://oauth2.googleapis.com; frame-src https://accounts.google.com/gsi/; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; base-uri 'none'; object-src 'none'; form-action 'none'">
+  <title>Wayward CloudSave 0.6.1 | Google 계정 연결</title>
+  <link rel="stylesheet" href="./auth.css">
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="./auth-061.js" defer></script>
+</head>
+<body>
+  <main>
+    <h1>Wayward CloudSave</h1>
+    <p class="intro">Google 계정을 연결해 Wayward CloudSave를 이용하세요.</p>
+    <section class="panel" aria-live="polite">
+      <strong id="origin-title">게임 연결 확인 중…</strong>
+      <p id="origin-detail">요청한 게임 창과 보안 연결을 확인하고 있습니다.</p>
+      <p id="origin-value" class="small"></p>
+    </section>
+    <section class="panel">
+      <strong>Google 계정</strong>
+      <p id="account-status" role="status" aria-live="polite">게임 연결을 기다리고 있습니다.</p>
+      <button id="connect" type="button" disabled>구글 계정으로 연결</button>
+    </section>
+    <p id="status" role="status" aria-live="polite">인증 환경 확인 중…</p>
+    <p class="footnote"><small>이 페이지는 Google Identity Services를 통해 직접 인증합니다. 액세스 토큰은 게임 실행 중 메모리에서만 사용되며 서버나 브라우저 저장소에 보관하지 않습니다.</small></p>
+  </main>
+</body>
+</html>

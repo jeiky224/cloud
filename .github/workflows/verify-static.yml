@@ -29,10 +29,13 @@ jobs:
       - name: Syntax checks
         run: |
           node --check site/auth.js
+          node --check site/auth-061.js
           node --check site/drive.js
           node --check site/config.js
       - name: Token-isolated auth and Drive bridge tests
         run: node --test verification/static-auth.test.cjs
+      - name: CloudSave 0.6.1 one-time token endpoint tests
+        run: node --test verification/auth-061.test.cjs
       - name: Reject custom service dependencies and secrets
         run: |
           ! grep -RniE 'vercel\.app|workers\.dev|cloudflare|render\.com|client_secret|refresh_token|token_endpoint' site
