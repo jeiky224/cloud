@@ -13,7 +13,7 @@ const NONCE = '0123456789abcdef0123456789abcdef0123456789abcdef';
 const TOKEN = 'unit-test-access-token-not-persisted';
 const SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
 
-function makePage({ gameOrigin = GAME_ORIGIN, login = 'remember', responseError = '' } = {}) {
+function makePage({ gameOrigin = GAME_ORIGIN, login = 'remember', responseError = '', mode = 'login' } = {}) {
   const ids = ['origin-title','origin-detail','origin-value','account-status','status','connect'];
   const elements = Object.fromEntries(ids.map(id => [id, {
     id, disabled: id === 'connect', textContent: '', listeners: Object.create(null),
@@ -36,6 +36,10 @@ function makePage({ gameOrigin = GAME_ORIGIN, login = 'remember', responseError 
     },
     hasGrantedAllScopes(response, scope) {
       return String(response.scope || '').split(/\s+/).includes(scope);
+    },
+    revoke(token, callback) {
+      gisCalls.push({ kind: 'revoke', token });
+      callback({ successful: true });
     }
   } } };
   const window = {
@@ -46,7 +50,8 @@ function makePage({ gameOrigin = GAME_ORIGIN, login = 'remember', responseError 
   const location = {
     origin: PAGES_ORIGIN,
     search: '?origin=' + encodeURIComponent(gameOrigin) +
-      '&nonce=' + encodeURIComponent(NONCE) + '&login=' + encodeURIComponent(login)
+      '&nonce=' + encodeURIComponent(NONCE) + '&login=' + encodeURIComponent(login) +
+      (mode === 'revoke' ? '&mode=revoke' : '')
   };
   const document = { getElementById(id) { return elements[id]; } };
   vm.runInNewContext(source, {
@@ -58,8 +63,13 @@ function makePage({ gameOrigin = GAME_ORIGIN, login = 'remember', responseError 
       type: 'wayward-cloud-auth-061-hello', version: 1, nonce: NONCE
     } });
   }
-  function click() { elements.connect.listeners.click(); }
-  return { elements, parentMessages, parent, listeners, gisCalls, handshake, click };
+  function click() {
+    if (elements.connect.listeners.click) elements.connect.listeners.click();
+  }
+  function sendParent(data, eventOrigin = gameOrigin) {
+    listeners.message({ source: parent, origin: eventOrigin, data });
+  }
+  return { elements, parentMessages, parent, listeners, gisCalls, handshake, click, sendParent };
 }
 
 test('the 0.6.1 endpoint is separate from the 0.7.x session bridge', () => {
@@ -122,4 +132,17 @@ test('token is not persisted and parent messages require source, origin and nonc
   assert.match(source, /event\.source === window\.opener/);
   assert.match(source, /event\.origin !== expectedGameOrigin\(\)/);
   assert.match(source, /data\.nonce !== nonce/);
+});
+
+test('0.6.1 endpoint supports the explicit Google permission revoke command', () => {
+  const page = makePage({ mode: 'revoke' });
+  page.handshake();
+  assert.ok(page.parentMessages.some(x => x.data.type === 'wayward-cloud-revoke-ready'));
+  page.sendParent({
+    type: 'wayward-cloud-revoke', version: 1, nonce: NONCE, accessToken: TOKEN
+  });
+  const result = page.parentMessages.find(x => x.data.type === 'wayward-cloud-revoke-result');
+  assert.ok(result);
+  assert.equal(result.data.revoked, true);
+  assert.equal(page.gisCalls.find(x => x.kind === 'revoke').token, TOKEN);
 });

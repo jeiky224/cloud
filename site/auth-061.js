@@ -3,6 +3,7 @@
   const params = new URLSearchParams(location.search);
   const gameOrigin = params.get('origin') || '';
   const nonce = params.get('nonce') || '';
+  const mode = params.get('mode') === 'revoke' ? 'revoke' : 'login';
   const loginPolicy = params.get('login') === 'select_account' ? 'select_account' : 'remember';
   const authOrigin = location.origin;
   const clientId = '35944231952-p82giir62o28bo001j9uvmqo3kgp9c99.apps.googleusercontent.com';
@@ -18,6 +19,7 @@
   let parentReady = false;
   let requestInFlight = false;
   let completed = false;
+  let revokeReadySent = false;
 
   function setStatus(message, error) {
     statusNode.textContent = String(message || '');
@@ -69,19 +71,74 @@
         !parentAlive() || event.source !== window.opener ||
         event.origin !== expectedGameOrigin() ||
         data.version !== protocolVersion || data.nonce !== nonce) return;
-    if (data.type !== 'wayward-cloud-auth-061-hello' || parentReady) return;
-    parentReady = true;
-    originTitle.textContent = 'Wayward 게임 연결 확인됨';
-    originDetail.textContent = fileMode
-      ? 'file:// 실행 창의 opaque Origin(null), 실제 opener 창 및 일회성 nonce를 확인했습니다.'
-      : '실제 게임 opener 창, 요청 Origin 및 일회성 nonce를 확인했습니다.';
-    originValue.textContent = '게임 Origin: ' + gameOrigin;
-    setAccountStatus('Google 계정을 연결할 준비가 되었습니다.');
-    setStatus(loginPolicy === 'select_account'
-      ? '로그아웃 후 재연결 요청입니다. Google 계정 선택 화면을 표시합니다.'
-      : '기존 Google 로그인 및 승인 상태를 재사용하도록 시도합니다.');
-    updateButton();
+
+    if (data.type === 'wayward-cloud-auth-061-hello' && !parentReady) {
+      parentReady = true;
+      originTitle.textContent = 'Wayward 게임 연결 확인됨';
+      originDetail.textContent = fileMode
+        ? 'file:// 실행 창의 opaque Origin(null), 실제 opener 창 및 일회성 nonce를 확인했습니다.'
+        : '실제 게임 opener 창, 요청 Origin 및 일회성 nonce를 확인했습니다.';
+      originValue.textContent = '게임 Origin: ' + gameOrigin;
+      if (mode === 'revoke') {
+        setAccountStatus('Google 앱 권한 철회 요청을 확인했습니다.');
+        setStatus('Google 권한 철회 응답을 처리할 준비가 되었습니다.');
+        sendRevokeReady();
+      } else {
+        setAccountStatus('Google 계정을 연결할 준비가 되었습니다.');
+        setStatus(loginPolicy === 'select_account'
+          ? '로그아웃 후 재연결 요청입니다. Google 계정 선택 화면을 표시합니다.'
+          : '기존 Google 로그인 및 승인 상태를 재사용하도록 시도합니다.');
+        updateButton();
+      }
+      return;
+    }
+
+    if (!parentReady || mode !== 'revoke' || data.type !== 'wayward-cloud-revoke') return;
+    const token = data.accessToken;
+    if (typeof token !== 'string' || token.length < 16 || token.length > 4096) {
+      sendToParent('wayward-cloud-revoke-result', { revoked: false, error: 'invalid-token' });
+      setStatus('철회 요청의 토큰 형식이 올바르지 않습니다.', true);
+      return;
+    }
+    if (!gisReady() || typeof google.accounts.oauth2.revoke !== 'function') {
+      sendToParent('wayward-cloud-revoke-result', { revoked: false, error: 'gis-unavailable' });
+      setStatus('Google 권한 철회 서비스를 사용할 수 없습니다.', true);
+      return;
+    }
+    if (requestInFlight || completed) return;
+    requestInFlight = true;
+    try {
+      google.accounts.oauth2.revoke(token, response => {
+        const revoked = !!(response && response.successful === true);
+        completed = true;
+        requestInFlight = false;
+        sendToParent('wayward-cloud-revoke-result', {
+          revoked, error: String(response && response.error || '')
+        });
+        setAccountStatus(revoked
+          ? 'Google 앱 권한을 철회했습니다.'
+          : 'Google 앱 권한 철회를 확인하지 못했습니다.', !revoked);
+        setStatus(revoked
+          ? 'Google 앱 권한 철회가 완료되었습니다.'
+          : 'Google 앱 권한 철회에 실패했습니다.', !revoked);
+        setTimeout(() => { try { window.close(); } catch (_) {} }, 700);
+      });
+    } catch (error) {
+      requestInFlight = false;
+      sendToParent('wayward-cloud-revoke-result', {
+        revoked: false, error: String(error && error.message || error)
+      });
+      setStatus('Google 앱 권한 철회 실패: ' + String(error && error.message || error), true);
+    }
   }
+
+  function sendRevokeReady() {
+    if (mode !== 'revoke' || revokeReadySent || !parentReady || !gisReady() ||
+        typeof google.accounts.oauth2.revoke !== 'function') return;
+    revokeReadySent = true;
+    sendToParent('wayward-cloud-revoke-ready');
+  }
+
   function fail(message, code) {
     requestInFlight = false;
     completed = false;
@@ -170,8 +227,14 @@
     return;
   }
   window.addEventListener('message', handleParentMessage);
-  connectButton.addEventListener('click', beginLogin);
-  connectButton.textContent = '구글 계정으로 연결';
+  if (mode === 'revoke') {
+    connectButton.hidden = true;
+    connectButton.disabled = true;
+    connectButton.textContent = 'Google 권한 철회';
+  } else {
+    connectButton.addEventListener('click', beginLogin);
+    connectButton.textContent = '구글 계정으로 연결';
+  }
   updateButton();
   if (!parentAlive()) {
     setStatus('Wayward 게임 창을 찾을 수 없습니다. 게임에서 연결 버튼을 다시 누르세요.', true);
@@ -185,7 +248,11 @@
     setStatus('Wayward 게임 창에 연결 준비 메시지를 보내지 못했습니다.', true);
   }
   const waitForGIS = deadline => {
-    if (gisReady()) { updateButton(); return; }
+    if (gisReady()) {
+      updateButton();
+      sendRevokeReady();
+      return;
+    }
     if (Date.now() >= deadline) {
       setStatus('Google 인증 라이브러리를 불러오지 못했습니다. 네트워크를 확인한 뒤 다시 시도하세요.', true);
       return;
