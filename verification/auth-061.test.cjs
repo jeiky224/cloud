@@ -136,6 +136,7 @@ test('token is not persisted and parent messages require source, origin and nonc
   assert.doesNotMatch(source, /localStorage|sessionStorage|document\.cookie/);
   assert.match(source, /event\.source !== window\.opener/);
   assert.match(source, /event\.origin !== expectedGameOrigin\(\)/);
+  assert.match(source, /event\.data !== 'object'|typeof data !== 'object'/);
   assert.match(source, /data\.nonce !== nonce/);
 });
 
