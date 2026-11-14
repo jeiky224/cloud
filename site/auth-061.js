@@ -5,7 +5,7 @@
   const nonce = params.get('nonce') || '';
   const mode = params.get('mode') === 'revoke' ? 'revoke' : 'login';
   const loginPolicy = params.get('login') === 'select_account' ? 'select_account' : 'remember';
-  const authOrigin = location.origin;
+  const authProtocol = location.protocol;
   const clientId = '35944231952-p82giir62o28bo001j9uvmqo3kgp9c99.apps.googleusercontent.com';
   const driveScope = 'https://www.googleapis.com/auth/drive.appdata';
   const protocolVersion = 1;
@@ -221,7 +221,7 @@
       fail(String(error && error.message || error || 'Google 인증을 시작하지 못했습니다.'), 'request-failed');
     }
   }
-  if (!nonceValid || !originValid || !/^https?:$/.test(authOrigin)) {
+  if (!nonceValid || !originValid || !/^https?:$/.test(authProtocol)) {
     setStatus('잘못된 인증 요청입니다. 게임에서 다시 연결하세요.', true);
     connectButton.disabled = true;
     return;

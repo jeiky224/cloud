@@ -49,6 +49,7 @@ function makePage({ gameOrigin = GAME_ORIGIN, login = 'remember', responseError 
   };
   const location = {
     origin: PAGES_ORIGIN,
+    protocol: 'https:',
     search: '?origin=' + encodeURIComponent(gameOrigin) +
       '&nonce=' + encodeURIComponent(NONCE) + '&login=' + encodeURIComponent(login) +
       (mode === 'revoke' ? '&mode=revoke' : '')
