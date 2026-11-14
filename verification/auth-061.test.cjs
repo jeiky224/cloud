@@ -40,6 +40,10 @@ function makePage({ gameOrigin = GAME_ORIGIN, login = 'remember', responseError 
     revoke(token, callback) {
       gisCalls.push({ kind: 'revoke', token });
       callback({ successful: true });
+    },
+    revoke(token, callback) {
+      gisCalls.push({ kind: 'revoke', token });
+      callback({ successful: true });
     }
   } } };
   const window = {
