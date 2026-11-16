@@ -31,6 +31,7 @@ jobs:
         run: |
           node --check site/auth.js
           node --check site/auth-061.js
+          node --check site/file-auth.js
           node --check site/drive.js
           node --check site/config.js
       - name: Token-isolated auth and Drive bridge tests
