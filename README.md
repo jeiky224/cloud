@@ -5,7 +5,7 @@ Current client integration: **Wayward CloudSave 0.6.2**, PC `file://` authentica
 - Pages base URL: https://jeiky224.github.io/cloud/
 - PC file bridge: https://jeiky224.github.io/cloud/file-auth.html
 - Static source: `site/file-auth.html`, `site/file-auth.js`, `site/file-auth.css`, `site/config.js`
-- Deployment source branch: `work/cloudsave-pages-drive-owner-20261113`
+- Deployment source branch: `main` (the initial validated deployment was run from `work/cloudsave-pages-drive-owner-20261113`)
 - Deployment workflow: `.github/workflows/deploy-pages.yml`
 
 The v4 bridge validates the opener, opaque `file://` Origin, app ID, nonce, request/attempt/session IDs, and a single transferred MessagePort. The access token is delivered only through that selected port. The page communicates directly with Google Identity Services and Google Drive; no backend, proxy, worker, token broker, or relay is used.
