@@ -3,6 +3,7 @@ name: Verify CloudSave static authentication pages
 on:
   push:
     branches:
+      - main
       - work/cloudsave-pages-drive-owner-20261113
     paths:
       - 'site/**'
