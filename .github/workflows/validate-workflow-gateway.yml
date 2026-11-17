@@ -1,0 +1,30 @@
+name: Validate workflow gateway
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  required-workflow-documents:
+    name: Required workflow documents
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Verify mandatory entry point and policies
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s AGENTS.md
+          for file in \
+            docs/WORKFLOW_GATEWAY.md \
+            docs/WORKFLOW_EXECUTION_POLICY.md \
+            docs/FORENSIC_AND_VERIFICATION_POLICY.md; do
+            test -s "$file" || { echo "::error::Missing or empty required file: $file"; exit 1; }
+            grep -Fq "$file" AGENTS.md || { echo "::error::AGENTS.md does not require $file"; exit 1; }
+          done
+          echo "All mandatory workflow documents exist and are linked from AGENTS.md."
