@@ -258,7 +258,6 @@ button:disabled {
     }
 }
 
-/* Hide technical connection descriptions */
 #origin-detail,
 #account-status:not(.error),
 #status:not(.error) {
