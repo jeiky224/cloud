@@ -11,6 +11,14 @@
 <title>Wayward CloudSave 0.6.1 | Google 계정 연결</title>
 
 <link rel="stylesheet" href="./auth-061.css">
+<style>
+/* Keep internal handshake details out of the visible login UI. */
+#origin-detail,
+#account-status:not(.error),
+#status:not(.error) {
+    display: none !important;
+}
+</style>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="./auth-061.js" defer></script>
 </head>
