@@ -257,3 +257,10 @@ button:disabled {
         transition: none !important;
     }
 }
+
+/* Hide technical connection descriptions */
+#origin-detail,
+#account-status:not(.error),
+#status:not(.error) {
+    display: none !important;
+}
