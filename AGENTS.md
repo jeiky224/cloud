@@ -18,3 +18,9 @@ Derive expected behavior from the CloudSave protocol, official platform/API cont
 
 ## Completion
 Report exact branch and SHA, changed files, checks, CI run IDs, deployment/artifact evidence, and remaining unverified runtime checks. CI success is not proof of real Google login, Drive CRUD, or device compatibility.
+
+## Repository scope restriction — static CloudSave authentication Pages only
+
+This repository is exclusively the hosting and delivery location for the static CloudSave authentication pages. It is **not** a product-development repository, application source-of-truth, experimental workspace, or staging area for WAL/Wayward launcher or game features.
+
+Do not perform general application or feature development here. All such development belongs in the designated WAL Studio development repositories. Changes in this repository are limited to the minimum maintenance strictly required to keep the existing static authentication pages, Pages deployment, bridge protocol, and released-client compatibility working. Preserve the static Pages/no-backend architecture and existing public URLs.
